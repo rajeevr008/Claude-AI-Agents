@@ -13,6 +13,7 @@ gold/tan accent for headings, white body text (see .streamlit/config.toml
 for the Streamlit widget theme).
 """
 
+import base64
 import sys
 import tempfile
 from datetime import date
@@ -26,6 +27,7 @@ from dv360_pipeline.query import CampaignNotFoundError, UnknownKpiError, fetch_c
 from dv360_pipeline.writer import write_report
 
 TEMPLATE_PATH = "templates/campaign_burst_template.xlsx"
+LOGO_PATH = "logo/apx_logo.png"
 
 GOLD = "#C9A876"
 TEAL = "#1A6B7A"
@@ -33,6 +35,8 @@ NAVY_DARK = "#0A0E27"
 NAVY_MID = "#12224A"
 
 st.set_page_config(page_title="APEX Campaign Report", page_icon="📊", layout="centered")
+
+_logo_b64 = base64.b64encode(Path(LOGO_PATH).read_bytes()).decode() if Path(LOGO_PATH).exists() else None
 
 st.markdown(
     f"""
@@ -60,28 +64,15 @@ st.markdown(
         justify-content: space-between;
     }}
     .apex-logo {{
-        text-align: right;
-        line-height: 1;
-        white-space: nowrap;
+        background: #FFFFFF;
+        border-radius: 8px;
+        padding: 0.5rem 0.9rem;
+        display: flex;
+        align-items: center;
     }}
-    .apex-logo .wordmark {{
-        font-size: 1.8rem;
-        font-weight: 800;
-        letter-spacing: 1px;
-    }}
-    .apex-logo .wordmark .ap {{
-        color: #1A1A1A;
-        -webkit-text-stroke: 0.5px #FFFFFF;
-    }}
-    .apex-logo .wordmark .x {{
-        color: {GOLD};
-    }}
-    .apex-logo .tagline {{
-        font-size: 0.6rem;
-        font-weight: 600;
-        letter-spacing: 2px;
-        color: #DDDDDD;
-        margin-top: 0.1rem;
+    .apex-logo img {{
+        height: 42px;
+        display: block;
     }}
     div[data-testid="stMetricLabel"] {{
         color: {GOLD} !important;
@@ -94,8 +85,7 @@ st.markdown(
                 <p>Generates the campaign Report in APEX template.</p>
             </div>
             <div class="apex-logo">
-                <div class="wordmark"><span class="ap">AP</span><span class="x">X</span></div>
-                <div class="tagline">APEX EXCHANGE</div>
+                {f'<img src="data:image/png;base64,{_logo_b64}" />' if _logo_b64 else ''}
             </div>
         </div>
     </div>
