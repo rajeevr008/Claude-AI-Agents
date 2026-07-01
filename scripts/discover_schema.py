@@ -22,6 +22,7 @@ TABLES = {
     "creative": "SG_creative_rpt_aiagent_dv360_607124520_1677971342_20260101_20260630_20260629_220348",
     "demo": "sg_demo_aiagent_dv360_607124520_1677978667_20260101_20260630_20260629_224448",
     "device": "sg_device_rpt_dv360_607124520_1677976737_20260101_20260630_20260629_222138",
+    "campaign_mapping": "campaign_mapping",
 }
 
 
@@ -46,10 +47,24 @@ def describe_table(client: bigquery.Client, label: str, table_name: str) -> None
     print()
 
 
+def describe_distinct_kpi_values(client: bigquery.Client) -> None:
+    table_ref = f"{PROJECT_ID}.{DATASET}.campaign_mapping"
+    print("=" * 100)
+    print("CAMPAIGN_MAPPING: distinct kpi and channel values")
+    print("=" * 100)
+    rows = client.query(
+        f"SELECT DISTINCT kpi, channel FROM `{table_ref}` ORDER BY kpi, channel"
+    ).result()
+    for row in rows:
+        print(f"  kpi={row.kpi!r}  channel={row.channel!r}")
+    print()
+
+
 def main() -> None:
     client = bigquery.Client(project=PROJECT_ID)
     for label, table_name in TABLES.items():
         describe_table(client, label, table_name)
+    describe_distinct_kpi_values(client)
 
 
 if __name__ == "__main__":
