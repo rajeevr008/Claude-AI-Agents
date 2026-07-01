@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+uv.lock
+
+# Credentials - never commit
+config/*.json
+!config/.gitkeep
+.env
+
+# Generated report output
+output/
+*.xlsx
+!templates/*.xlsx
