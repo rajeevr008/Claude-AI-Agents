@@ -1,6 +1,8 @@
 @echo off
 cd /d "%~dp0"
 
+if exist "local_settings.bat" call "local_settings.bat"
+
 where uv >nul 2>nul
 if errorlevel 1 (
     echo uv is not installed or not on PATH.

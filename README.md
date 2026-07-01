@@ -28,9 +28,11 @@ uv run streamlit run app.py                                 # web app, opens in 
 
 On Windows, double-click `run_app.bat` instead of using the CLI — it opens
 the same Streamlit app in your browser (requires `uv` to already be
-installed, and `GOOGLE_APPLICATION_CREDENTIALS` set as a permanent
-environment variable, since a double-clicked script won't inherit a
-one-off `set`/`$env:` from a terminal session).
+installed). Since a double-clicked script won't inherit a terminal
+session's one-off `set`/`$env:` for `GOOGLE_APPLICATION_CREDENTIALS`, copy
+`local_settings.bat.example` to `local_settings.bat` (gitignored, never
+commit it) and put your real credentials path there — `run_app.bat` picks
+it up automatically.
 
 ## Stage 1 — discovery
 
