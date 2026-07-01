@@ -26,6 +26,12 @@ uv run dv360-report <io_id> --start <start> --end <end>     # CLI: sub-range bur
 uv run streamlit run app.py                                 # web app, opens in browser
 ```
 
+On Windows, double-click `run_app.bat` instead of using the CLI — it opens
+the same Streamlit app in your browser (requires `uv` to already be
+installed, and `GOOGLE_APPLICATION_CREDENTIALS` set as a permanent
+environment variable, since a double-clicked script won't inherit a
+one-off `set`/`$env:` from a terminal session).
+
 ## Stage 1 — discovery
 
 ```
