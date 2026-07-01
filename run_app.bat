@@ -1,4 +1,5 @@
 @echo off
+title APEX Campaign Report
 cd /d "%~dp0"
 
 if exist "local_settings.bat" call "local_settings.bat"

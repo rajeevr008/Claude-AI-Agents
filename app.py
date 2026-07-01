@@ -1,5 +1,5 @@
 """
-Streamlit front end for the DV360 campaign burst report.
+Streamlit front end for the DV360 campaign burst report - "APEX Campaign Report".
 
 Run:
     uv run streamlit run app.py
@@ -7,6 +7,10 @@ Run:
 Wraps the existing Layer 4 (query.py) / Layer 5 (writer.py) modules - no
 report logic lives here, this is just a form + download button on top of
 dv360_pipeline.query.fetch_campaign_burst() and dv360_pipeline.writer.write_report().
+
+Color scheme matches apxexchange.com: dark navy-to-teal gradient background,
+gold/tan accent for headings, white body text (see .streamlit/config.toml
+for the Streamlit widget theme).
 """
 
 import sys
@@ -23,9 +27,44 @@ from dv360_pipeline.writer import write_report
 
 TEMPLATE_PATH = "templates/campaign_burst_template.xlsx"
 
-st.set_page_config(page_title="DV360 Campaign Burst Report", page_icon="📊")
-st.title("DV360 Campaign Burst Report")
-st.caption("Generates the campaign burst Excel report from BigQuery data.")
+GOLD = "#C9A876"
+TEAL = "#1A6B7A"
+NAVY_DARK = "#0A0E27"
+NAVY_MID = "#12224A"
+
+st.set_page_config(page_title="APEX Campaign Report", page_icon="📊", layout="centered")
+
+st.markdown(
+    f"""
+    <style>
+    .apex-header {{
+        background: linear-gradient(135deg, #000000 0%, {NAVY_DARK} 35%, {NAVY_MID} 65%, {TEAL} 100%);
+        padding: 1.75rem 2rem;
+        border-radius: 10px;
+        margin-bottom: 1.5rem;
+    }}
+    .apex-header h1 {{
+        color: {GOLD};
+        font-weight: 700;
+        margin: 0;
+        font-size: 1.9rem;
+    }}
+    .apex-header p {{
+        color: #FFFFFF;
+        margin: 0.25rem 0 0 0;
+        opacity: 0.85;
+    }}
+    div[data-testid="stMetricLabel"] {{
+        color: {GOLD} !important;
+    }}
+    </style>
+    <div class="apex-header">
+        <h1>APEX Campaign Report</h1>
+        <p>Generates the campaign burst Excel report from BigQuery data.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 with st.form("report_form"):
     io_id = st.number_input("Insertion Order ID", min_value=1, step=1, format="%d")
