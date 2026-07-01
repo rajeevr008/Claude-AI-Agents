@@ -17,6 +17,15 @@ Auth: either run `gcloud auth application-default login`, or set
 `GOOGLE_APPLICATION_CREDENTIALS` to point at a service account JSON file
 (keep it outside the repo, or under `config/` which is gitignored).
 
+## Generating a report
+
+```
+uv run dv360-report <io_id>                                 # CLI: full flight range
+uv run dv360-report <io_id> --start <start> --end <end>     # CLI: sub-range burst
+
+uv run streamlit run app.py                                 # web app, opens in browser
+```
+
 ## Stage 1 — discovery
 
 ```
