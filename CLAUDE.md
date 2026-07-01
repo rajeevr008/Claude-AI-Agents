@@ -146,7 +146,14 @@ uv sync
 uv run scripts/discover_schema.py                          # re-run if source tables/columns change
 uv run scripts/test_layer4.py <io_id> <start> <end>         # Layer 4 only, prints DataFrames
 uv run scripts/test_layer5.py <io_id> <start> <end> [out]   # full pipeline, writes .xlsx
+
+uv run dv360-report <io_id>                                 # production CLI: full flight range
+uv run dv360-report <io_id> --start <start> --end <end>     # sub-range burst (e.g. weekly report)
 ```
+
+The CLI (`src/dv360_pipeline/cli.py`) defaults the reporting range to the
+IO's full flight dates from `campaign_mapping` when `--start`/`--end` are
+omitted; both must be given together if overriding.
 
 Auth via `gcloud auth application-default login` or
 `GOOGLE_APPLICATION_CREDENTIALS` env var (Windows: `set` in cmd.exe,
@@ -157,8 +164,5 @@ Auth via `gcloud auth application-default login` or
 - No orchestration/scheduling (Layer 6 in the original architecture diagram
   — Cloud Composer, monitoring, human review) — explicitly out of scope for
   this repo.
-- No CLI/entry point wiring `query.py` + `writer.py` together for
-  production use beyond the `scripts/test_layer5.py` test harness — worth
-  promoting into a proper CLI once the mapping is fully signed off.
 - `KPI_COLUMN_MAP` only has `clicks`/`views`/`impressions` — extend if
   `campaign_mapping.kpi` gets new values.
