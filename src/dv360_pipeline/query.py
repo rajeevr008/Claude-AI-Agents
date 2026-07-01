@@ -172,18 +172,17 @@ def _add_spend_column(df: pd.DataFrame, kpi: str, guaranteed_rate: float) -> pd.
     return df
 
 
-def fetch_campaign_burst(io_id: int, start_date: date, end_date: date) -> CampaignBurstData:
+def fetch_campaign_burst(
+    io_id: int, start_date: date | None = None, end_date: date | None = None
+) -> CampaignBurstData:
     """
     Fetch all data needed for one campaign burst report.
 
     io_id: DV360 insertion order ID (join key across all tables).
     start_date, end_date: the reporting date range for this burst (may be a
-        sub-range of the IO's full flight dates, which are looked up
-        separately from campaign_mapping).
+        sub-range of the IO's full flight dates). If omitted, defaults to
+        the IO's full flight dates from campaign_mapping.
     """
-    if start_date > end_date:
-        raise ValueError(f"start_date ({start_date}) is after end_date ({end_date})")
-
     client = bigquery.Client(project=PROJECT_ID)
 
     try:
@@ -192,6 +191,14 @@ def fetch_campaign_burst(io_id: int, start_date: date, end_date: date) -> Campai
         raise RuntimeError(
             f"BigQuery table not found while looking up campaign_mapping: {exc}"
         ) from exc
+
+    if start_date is None:
+        start_date = meta.flight_start
+    if end_date is None:
+        end_date = meta.flight_end
+
+    if start_date > end_date:
+        raise ValueError(f"start_date ({start_date}) is after end_date ({end_date})")
 
     creative_df = _fetch_creative_df(client, io_id, start_date, end_date)
     targeting_df = _fetch_targeting_df(client, io_id, start_date, end_date)

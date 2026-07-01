@@ -11,6 +11,9 @@ dependencies = [
     "pyarrow>=17.0.0",
 ]
 
+[project.scripts]
+dv360-report = "dv360_pipeline.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
