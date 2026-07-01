@@ -54,13 +54,50 @@ st.markdown(
         margin: 0.25rem 0 0 0;
         opacity: 0.85;
     }}
+    .apex-header-row {{
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+    }}
+    .apex-logo {{
+        text-align: right;
+        line-height: 1;
+        white-space: nowrap;
+    }}
+    .apex-logo .wordmark {{
+        font-size: 1.8rem;
+        font-weight: 800;
+        letter-spacing: 1px;
+    }}
+    .apex-logo .wordmark .ap {{
+        color: #1A1A1A;
+        -webkit-text-stroke: 0.5px #FFFFFF;
+    }}
+    .apex-logo .wordmark .x {{
+        color: {GOLD};
+    }}
+    .apex-logo .tagline {{
+        font-size: 0.6rem;
+        font-weight: 600;
+        letter-spacing: 2px;
+        color: #DDDDDD;
+        margin-top: 0.1rem;
+    }}
     div[data-testid="stMetricLabel"] {{
         color: {GOLD} !important;
     }}
     </style>
     <div class="apex-header">
-        <h1>APEX Campaign Report</h1>
-        <p>Generates the campaign burst Excel report from BigQuery data.</p>
+        <div class="apex-header-row">
+            <div>
+                <h1>APEX Campaign Report</h1>
+                <p>Generates the campaign Report in APEX template.</p>
+            </div>
+            <div class="apex-logo">
+                <div class="wordmark"><span class="ap">AP</span><span class="x">X</span></div>
+                <div class="tagline">APEX EXCHANGE</div>
+            </div>
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
