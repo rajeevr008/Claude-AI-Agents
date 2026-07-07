@@ -127,13 +127,17 @@ Implementation: `src/dv360_pipeline/writer.py`, see `_write_section()` /
 
 ### Data Template sheet
 
-Only a subset of its 24 columns have a real source and are filled: Date,
-Campaign Name, Cost, Impressions, Clicks, Video Views, and the four
-video-completion-quartile columns — sourced from the daily (`date_df`)
-breakdown, one row per day. Everything else (Media Schedule No, Topic,
-Audience, Channel, Publisher, Placement, Creative, Strategy, Platform
-Objective, Rate Type, Media Buy Format, Currency) has no source in the
-three reporting tables and is left blank. Scope may expand later.
+A subset of its 24 columns have a real source and are filled: Date,
+Campaign Name, Creative, Strategy, Cost, Impressions, Clicks, Video Views,
+and the four video-completion-quartile columns. Sourced from
+`data_template_df` — a date + creative (`trueview_ad`) + targeting
+(same derivation as the Targeting breakdown) grain query — one row per
+distinct date/creative/targeting combination, *not* just one row per day
+(the day-only `date_df` has no creative/targeting detail to draw from).
+Creative = `trueview_ad`, Strategy = derived targeting string. Everything
+else (Media Schedule No, Topic, Audience, Channel, Publisher, Placement,
+Platform Objective, Rate Type, Media Buy Format, Currency) has no source
+in the three reporting tables and is left blank. Scope may expand later.
 
 ### Sheet1
 
