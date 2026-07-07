@@ -23,13 +23,28 @@ DEMO_TABLE = "sg_demo_aiagent_dv360_607124520_1677978667_20260101_20260630_20260
 DEVICE_TABLE = "sg_device_rpt_dv360_607124520_1677976737_20260101_20260630_20260629_222138"
 CAMPAIGN_MAPPING_TABLE = "campaign_mapping"
 
-# Maps campaign_mapping.kpi values to the creative-table column they're
-# measured against, for the spend formula: spend = guaranteed_rate * SUM(kpi_column).
+# Maps campaign_mapping.kpi values to the source column they're measured
+# against.
 KPI_COLUMN_MAP = {
     "clicks": "clicks",
     "views": "youtube_views",
     "impressions": "impressions",
+    "completed views": "video_100",  # rich_media_video_completions
 }
+
+# Spend formula differs by KPI type:
+#   clicks / views / completed views -> guaranteed_rate * SUM(kpi_column)
+#   impressions -> CPM formula: guaranteed_rate * SUM(impressions) / 1000
+KPI_SPEND_FORMULA = {
+    "clicks": lambda value, rate: value * rate,
+    "views": lambda value, rate: value * rate,
+    "impressions": lambda value, rate: value * rate / 1000,
+    "completed views": lambda value, rate: value * rate,
+}
+
+
+def _compute_spend(value, kpi: str, guaranteed_rate: float):
+    return KPI_SPEND_FORMULA[kpi](value, guaranteed_rate)
 
 
 class CampaignNotFoundError(Exception):
@@ -166,7 +181,8 @@ def _fetch_device_df(client: bigquery.Client, io_id: int, start_date: date, end_
             device_type,
             IFNULL(SUM(impressions), 0) AS impressions,
             IFNULL(SUM(youtube_views), 0) AS youtube_views,
-            IFNULL(SUM(clicks), 0) AS clicks
+            IFNULL(SUM(clicks), 0) AS clicks,
+            IFNULL(SUM(rich_media_video_completions), 0) AS video_100
         FROM {_table_ref(DEVICE_TABLE)}
         WHERE insertion_order_id = @io_id
           AND date BETWEEN @start_date AND @end_date
@@ -182,7 +198,8 @@ def _fetch_demo_df(client: bigquery.Client, io_id: int, start_date: date, end_da
             {group_col},
             IFNULL(SUM(impressions), 0) AS impressions,
             IFNULL(SUM(youtube_views), 0) AS youtube_views,
-            IFNULL(SUM(clicks), 0) AS clicks
+            IFNULL(SUM(clicks), 0) AS clicks,
+            IFNULL(SUM(rich_media_video_completions), 0) AS video_100
         FROM {_table_ref(DEMO_TABLE)}
         WHERE insertion_order_id = @io_id
           AND date BETWEEN @start_date AND @end_date
@@ -195,7 +212,7 @@ def _fetch_demo_df(client: bigquery.Client, io_id: int, start_date: date, end_da
 def _add_spend_column(df: pd.DataFrame, kpi: str, guaranteed_rate: float) -> pd.DataFrame:
     kpi_column = KPI_COLUMN_MAP[kpi]
     df = df.copy()
-    df["spend"] = df[kpi_column] * guaranteed_rate
+    df["spend"] = _compute_spend(df[kpi_column], kpi, guaranteed_rate)
     return df
 
 
@@ -237,7 +254,7 @@ def fetch_campaign_burst(
 
     kpi_column = KPI_COLUMN_MAP[meta.kpi]
     total_kpi_value = float(creative_df[kpi_column].sum()) if not creative_df.empty else 0.0
-    spend = total_kpi_value * meta.guaranteed_rate
+    spend = _compute_spend(total_kpi_value, meta.kpi, meta.guaranteed_rate)
 
     creative_df = _add_spend_column(creative_df, meta.kpi, meta.guaranteed_rate)
     targeting_df = _add_spend_column(targeting_df, meta.kpi, meta.guaranteed_rate)
