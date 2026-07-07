@@ -29,3 +29,4 @@ class CampaignBurstData:
     gender_df: pd.DataFrame
     age_df: pd.DataFrame
     date_df: pd.DataFrame
+    data_template_df: pd.DataFrame

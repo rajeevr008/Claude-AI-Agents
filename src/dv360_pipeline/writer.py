@@ -199,9 +199,11 @@ def write_report(data: CampaignBurstData, template_path: str, output_path: str) 
 def _write_data_template_sheet(wb, data: CampaignBurstData) -> None:
     ws = wb["Data Template"]
     row = 3  # header is row 2
-    for r in data.date_df.itertuples(index=False):
+    for r in data.data_template_df.itertuples(index=False):
         ws.cell(row=row, column=1, value=r.date)                     # Date
         ws.cell(row=row, column=7, value=data.meta.campaign_name)    # Campaign Name
+        ws.cell(row=row, column=9, value=r.creative_name)            # Creative
+        ws.cell(row=row, column=10, value=r.targeting)               # Strategy
         ws.cell(row=row, column=15, value=round(float(r.spend), 2))  # Cost
         ws.cell(row=row, column=16, value=int(r.impressions))        # Impressions
         ws.cell(row=row, column=17, value=int(r.clicks))             # Clicks

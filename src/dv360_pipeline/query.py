@@ -133,6 +133,33 @@ def _fetch_date_df(client: bigquery.Client, io_id: int, start_date: date, end_da
     return _run_query(client, sql, _date_params(io_id, start_date, end_date))
 
 
+def _fetch_data_template_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
+    """One row per date + creative + targeting, for the Data Template sheet's
+    Creative and Strategy columns (date_df alone only has date granularity)."""
+    targeting_expr = (
+        "SPLIT(line_item, '-')[OFFSET(ARRAY_LENGTH(SPLIT(line_item, '-')) - 1)] AS targeting"
+    )
+    sql = f"""
+        SELECT
+            date,
+            trueview_ad AS creative_name,
+            {targeting_expr},
+            IFNULL(SUM(impressions), 0) AS impressions,
+            IFNULL(SUM(youtube_views), 0) AS youtube_views,
+            IFNULL(SUM(clicks), 0) AS clicks,
+            IFNULL(SUM(rich_media_video_first_quartile_completes), 0) AS video_25,
+            IFNULL(SUM(rich_media_video_midpoints), 0) AS video_50,
+            IFNULL(SUM(rich_media_video_third_quartile_completes), 0) AS video_75,
+            IFNULL(SUM(rich_media_video_completions), 0) AS video_100
+        FROM {_table_ref(CREATIVE_TABLE)}
+        WHERE insertion_order_id = @io_id
+          AND date BETWEEN @start_date AND @end_date
+        GROUP BY date, creative_name, targeting
+        ORDER BY date, creative_name, targeting
+    """
+    return _run_query(client, sql, _date_params(io_id, start_date, end_date))
+
+
 def _fetch_device_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
     sql = f"""
         SELECT
@@ -206,6 +233,7 @@ def fetch_campaign_burst(
     device_df = _fetch_device_df(client, io_id, start_date, end_date)
     gender_df = _fetch_demo_df(client, io_id, start_date, end_date, "youtube_gender")
     age_df = _fetch_demo_df(client, io_id, start_date, end_date, "youtube_age")
+    data_template_df = _fetch_data_template_df(client, io_id, start_date, end_date)
 
     kpi_column = KPI_COLUMN_MAP[meta.kpi]
     total_kpi_value = float(creative_df[kpi_column].sum()) if not creative_df.empty else 0.0
@@ -214,6 +242,7 @@ def fetch_campaign_burst(
     creative_df = _add_spend_column(creative_df, meta.kpi, meta.guaranteed_rate)
     targeting_df = _add_spend_column(targeting_df, meta.kpi, meta.guaranteed_rate)
     date_df = _add_spend_column(date_df, meta.kpi, meta.guaranteed_rate)
+    data_template_df = _add_spend_column(data_template_df, meta.kpi, meta.guaranteed_rate)
 
     # Device/gender/age tables don't carry every creative-table KPI column
     # (e.g. no video-quartile-based spend split needed there); spend on
@@ -234,4 +263,5 @@ def fetch_campaign_burst(
         gender_df=gender_df,
         age_df=age_df,
         date_df=date_df,
+        data_template_df=data_template_df,
     )
