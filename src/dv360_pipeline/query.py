@@ -111,6 +111,19 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     )
 
 
+def list_ios_for_campaign(campaign_name: str) -> pd.DataFrame:
+    """All IOs under a campaign_name, for the app's IO picker table."""
+    client = bigquery.Client(project=PROJECT_ID)
+    sql = f"""
+        SELECT io_id, io_name, budget, guaranteedrate, kpi, channel, start_date, end_date
+        FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
+        WHERE LOWER(campaign_name) LIKE LOWER(CONCAT('%', @campaign_name, '%'))
+        ORDER BY io_name
+    """
+    params = [bigquery.ScalarQueryParameter("campaign_name", "STRING", campaign_name)]
+    return _run_query(client, sql, params)
+
+
 def _creative_agg_sql(select_expr: str, group_by: str) -> str:
     return f"""
         SELECT
@@ -281,4 +294,84 @@ def fetch_campaign_burst(
         age_df=age_df,
         date_df=date_df,
         data_template_df=data_template_df,
+    )
+
+
+def _combine_dfs(dfs: list[pd.DataFrame], group_cols: list[str]) -> pd.DataFrame:
+    non_empty = [df for df in dfs if not df.empty]
+    if not non_empty:
+        return dfs[0]
+    combined = pd.concat(non_empty, ignore_index=True)
+    sum_cols = [c for c in combined.columns if c not in group_cols]
+    return combined.groupby(group_cols, as_index=False)[sum_cols].sum()
+
+
+def fetch_combined_campaign_burst(
+    io_ids: list[int], start_date: date | None = None, end_date: date | None = None
+) -> CampaignBurstData:
+    """
+    Fetch and merge multiple IOs into one combined report (e.g. the same
+    campaign split across several IOs/markets). Row-level breakdowns are
+    summed across IOs on their shared key column (creative_name, targeting,
+    device_type, etc.) - each IO's spend is computed with its own kpi/rate
+    first, then summed, so this works even if the selected IOs have
+    different KPI types or guaranteed rates.
+
+    If start_date/end_date are omitted, defaults to the union of the
+    selected IOs' flight ranges (min start, max end).
+    """
+    if not io_ids:
+        raise ValueError("io_ids must not be empty")
+    if len(io_ids) == 1:
+        return fetch_campaign_burst(io_ids[0], start_date, end_date)
+
+    client = bigquery.Client(project=PROJECT_ID)
+    metas = []
+    for io_id in io_ids:
+        try:
+            metas.append(_fetch_campaign_meta(client, io_id))
+        except NotFound as exc:
+            raise RuntimeError(
+                f"BigQuery table not found while looking up campaign_mapping: {exc}"
+            ) from exc
+
+    if start_date is None:
+        start_date = min(m.flight_start for m in metas)
+    if end_date is None:
+        end_date = max(m.flight_end for m in metas)
+    if start_date > end_date:
+        raise ValueError(f"start_date ({start_date}) is after end_date ({end_date})")
+
+    results = [fetch_campaign_burst(io_id, start_date, end_date) for io_id in io_ids]
+
+    guaranteed_rates = {m.guaranteed_rate for m in metas}
+    kpis = {m.kpi for m in metas}
+    channels = {m.channel for m in metas}
+
+    combined_meta = CampaignMeta(
+        campaign_name=metas[0].campaign_name,
+        io_name=" + ".join(m.io_name for m in metas),
+        io_id=list(io_ids),
+        budget=sum(m.budget for m in metas),
+        guaranteed_rate=guaranteed_rates.pop() if len(guaranteed_rates) == 1 else "Mixed",
+        kpi=kpis.pop() if len(kpis) == 1 else "Mixed",
+        channel=channels.pop() if len(channels) == 1 else "Mixed",
+        flight_start=min(m.flight_start for m in metas),
+        flight_end=max(m.flight_end for m in metas),
+    )
+
+    return CampaignBurstData(
+        meta=combined_meta,
+        report_start=start_date,
+        report_end=end_date,
+        spend=sum(r.spend for r in results),
+        creative_df=_combine_dfs([r.creative_df for r in results], ["creative_name"]),
+        targeting_df=_combine_dfs([r.targeting_df for r in results], ["targeting"]),
+        device_df=_combine_dfs([r.device_df for r in results], ["device_type"]),
+        gender_df=_combine_dfs([r.gender_df for r in results], ["youtube_gender"]),
+        age_df=_combine_dfs([r.age_df for r in results], ["youtube_age"]),
+        date_df=_combine_dfs([r.date_df for r in results], ["date"]),
+        data_template_df=_combine_dfs(
+            [r.data_template_df for r in results], ["date", "creative_name", "targeting"]
+        ),
     )

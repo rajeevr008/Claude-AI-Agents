@@ -8,9 +8,9 @@ import pandas as pd
 class CampaignMeta:
     campaign_name: str
     io_name: str
-    io_id: int
+    io_id: int | list[int]
     budget: float
-    guaranteed_rate: float
+    guaranteed_rate: float | str
     kpi: str
     channel: str
     flight_start: date

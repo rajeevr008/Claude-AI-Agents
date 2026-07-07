@@ -23,7 +23,12 @@ sys.path.insert(0, "src")
 
 import streamlit as st
 
-from dv360_pipeline.query import CampaignNotFoundError, UnknownKpiError, fetch_campaign_burst
+from dv360_pipeline.query import (
+    CampaignNotFoundError,
+    UnknownKpiError,
+    fetch_combined_campaign_burst,
+    list_ios_for_campaign,
+)
 from dv360_pipeline.writer import write_report
 
 TEMPLATE_PATH = "templates/campaign_burst_template.xlsx"
@@ -93,11 +98,50 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-with st.form("report_form"):
-    io_id = st.number_input("Insertion Order ID", min_value=1, step=1, format="%d")
+campaign_name = st.text_input("Campaign Name (partial match is fine)")
+find_clicked = st.button("Find Insertion Orders")
+
+if find_clicked:
+    if not campaign_name.strip():
+        st.error("Enter a campaign name to search for.")
+    else:
+        with st.spinner("Looking up insertion orders..."):
+            try:
+                ios_df = list_ios_for_campaign(campaign_name.strip())
+            except Exception as exc:  # noqa: BLE001 - surface auth/network errors to the user
+                st.error(f"Failed to look up campaign: {exc}")
+                ios_df = None
+        if ios_df is not None:
+            if ios_df.empty:
+                st.warning(f"No insertion orders found for campaign name matching {campaign_name!r}.")
+                st.session_state.pop("ios_df", None)
+            else:
+                ios_df.insert(0, "Combine", False)
+                st.session_state["ios_df"] = ios_df
+
+if "ios_df" in st.session_state:
+    st.write("Select the insertion order(s) to include in the report:")
+    edited_df = st.data_editor(
+        st.session_state["ios_df"],
+        column_config={
+            "Combine": st.column_config.CheckboxColumn("Combine"),
+            "io_id": st.column_config.NumberColumn("Insertion Order ID", format="%d", disabled=True),
+            "io_name": st.column_config.TextColumn("IO Name", disabled=True),
+            "budget": st.column_config.NumberColumn("Budget", format="$%.2f", disabled=True),
+            "guaranteedrate": st.column_config.NumberColumn("Guaranteed Rate", disabled=True),
+            "kpi": st.column_config.TextColumn("KPI", disabled=True),
+            "channel": st.column_config.TextColumn("Channel", disabled=True),
+            "start_date": st.column_config.DateColumn("Flight Start", disabled=True),
+            "end_date": st.column_config.DateColumn("Flight End", disabled=True),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="ios_editor",
+    )
+    selected_io_ids = edited_df.loc[edited_df["Combine"], "io_id"].astype(int).tolist()
 
     override_dates = st.checkbox(
-        "Use a custom reporting date range (default: the IO's full flight dates)"
+        "Use a custom reporting date range (default: the union of the selected IOs' flight dates)"
     )
     start_date = end_date = None
     if override_dates:
@@ -107,43 +151,46 @@ with st.form("report_form"):
         with col2:
             end_date = st.date_input("Reporting end date", value=date.today())
 
-    submitted = st.form_submit_button("Generate Report")
+    generate_clicked = st.button("Generate Report", disabled=not selected_io_ids)
+    if not selected_io_ids:
+        st.caption("Check at least one row above to enable report generation.")
 
-if submitted:
-    if not io_id:
-        st.error("Enter an Insertion Order ID.")
-    elif override_dates and start_date > end_date:
-        st.error(f"Start date ({start_date}) is after end date ({end_date}).")
-    else:
-        try:
-            with st.spinner("Fetching data from BigQuery..."):
-                data = fetch_campaign_burst(int(io_id), start_date, end_date)
-        except CampaignNotFoundError as exc:
-            st.error(str(exc))
-        except UnknownKpiError as exc:
-            st.error(str(exc))
-        except ValueError as exc:
-            st.error(str(exc))
-        except Exception as exc:  # noqa: BLE001 - surface auth/network errors to the user
-            st.error(f"Failed to fetch data: {exc}")
+    if generate_clicked:
+        if override_dates and start_date > end_date:
+            st.error(f"Start date ({start_date}) is after end date ({end_date}).")
         else:
-            st.success(f"Fetched data for **{data.meta.campaign_name}** ({data.meta.io_name})")
+            try:
+                with st.spinner("Fetching data from BigQuery..."):
+                    data = fetch_combined_campaign_burst(selected_io_ids, start_date, end_date)
+            except CampaignNotFoundError as exc:
+                st.error(str(exc))
+            except UnknownKpiError as exc:
+                st.error(str(exc))
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:  # noqa: BLE001 - surface auth/network errors to the user
+                st.error(f"Failed to fetch data: {exc}")
+            else:
+                st.success(f"Fetched data for **{data.meta.campaign_name}** ({data.meta.io_name})")
 
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Budget", f"${data.meta.budget:,.2f}")
-            col2.metric("Spend", f"${data.spend:,.2f}")
-            col3.metric("Pace", f"{data.spend / data.meta.budget:.1%}" if data.meta.budget else "N/A")
-            col4.metric("KPI", data.meta.kpi)
-            st.write(f"Reporting range: **{data.report_start}** to **{data.report_end}**")
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Budget", f"${data.meta.budget:,.2f}")
+                col2.metric("Spend", f"${data.spend:,.2f}")
+                col3.metric("Pace", f"{data.spend / data.meta.budget:.1%}" if data.meta.budget else "N/A")
+                col4.metric("KPI", str(data.meta.kpi))
+                st.write(f"Reporting range: **{data.report_start}** to **{data.report_end}**")
+                if len(selected_io_ids) > 1:
+                    st.caption(f"Combined from {len(selected_io_ids)} insertion orders: {selected_io_ids}")
 
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                output_path = Path(tmp_dir) / f"report_{io_id}_{data.report_start}_{data.report_end}.xlsx"
-                write_report(data, TEMPLATE_PATH, str(output_path))
-                report_bytes = output_path.read_bytes()
+                io_id_label = "_".join(str(i) for i in selected_io_ids)
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    output_path = Path(tmp_dir) / f"report_{io_id_label}_{data.report_start}_{data.report_end}.xlsx"
+                    write_report(data, TEMPLATE_PATH, str(output_path))
+                    report_bytes = output_path.read_bytes()
 
-            st.download_button(
-                label="Download report (.xlsx)",
-                data=report_bytes,
-                file_name=f"report_{io_id}_{data.report_start}_{data.report_end}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+                st.download_button(
+                    label="Download report (.xlsx)",
+                    data=report_bytes,
+                    file_name=f"report_{io_id_label}_{data.report_start}_{data.report_end}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
