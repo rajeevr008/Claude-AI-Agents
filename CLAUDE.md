@@ -30,15 +30,18 @@ JSON). Never commit credentials; `config/` is gitignored for this.
 
 ## Key business logic
 
-**Spend formula**: `spend = guaranteed_rate * SUM(kpi_column)`, where
-`campaign_mapping.kpi` selects which creative-table column to sum:
-- `kpi='clicks'` → sum of `clicks`
-- `kpi='views'` → sum of `youtube_views`
-- (`'impressions'` is also mapped defensively, though not seen in data yet)
+**Spend formula**: `campaign_mapping.kpi` selects both which column to sum
+and which multiplier formula to apply — these differ by KPI type, so they're
+two separate lookups (`KPI_COLUMN_MAP` and `KPI_SPEND_FORMULA` in
+`query.py`):
+- `kpi='clicks'` → `guaranteed_rate * SUM(clicks)`
+- `kpi='views'` → `guaranteed_rate * SUM(youtube_views)`
+- `kpi='impressions'` → `guaranteed_rate * SUM(impressions) / 1000` (CPM)
+- `kpi='completed views'` → `guaranteed_rate * SUM(rich_media_video_completions)`
 
-See `KPI_COLUMN_MAP` in `query.py`. An unrecognized `kpi` value raises
-`UnknownKpiError` rather than silently computing wrong spend — add a mapping
-there if a genuinely new KPI type shows up.
+An unrecognized `kpi` value raises `UnknownKpiError` rather than silently
+computing wrong spend — add mappings in both dicts if a genuinely new KPI
+type shows up.
 
 Spend is computed **per row** in every breakdown (creative/targeting/device/
 gender/age/date), not just as a single total — each row's spend uses that
