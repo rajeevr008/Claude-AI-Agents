@@ -23,6 +23,7 @@ sys.path.insert(0, "src")
 
 import streamlit as st
 
+from dv360_pipeline.insights import InsightsError, generate_insights
 from dv360_pipeline.query import (
     CampaignNotFoundError,
     UnknownKpiError,
@@ -151,6 +152,8 @@ if "ios_df" in st.session_state:
         with col2:
             end_date = st.date_input("Reporting end date", value=date.today())
 
+    want_insights = st.checkbox("Generate AI insights (uses the Claude API)", value=True)
+
     generate_clicked = st.button("Generate Report", disabled=not selected_io_ids)
     if not selected_io_ids:
         st.caption("Check at least one row above to enable report generation.")
@@ -182,10 +185,21 @@ if "ios_df" in st.session_state:
                 if len(selected_io_ids) > 1:
                     st.caption(f"Combined from {len(selected_io_ids)} insertion orders: {selected_io_ids}")
 
+                insights = None
+                if want_insights:
+                    with st.spinner("Generating AI insights..."):
+                        try:
+                            insights = generate_insights(data)
+                        except InsightsError as exc:
+                            st.warning(f"Insights unavailable, generating report without them: {exc}")
+                    if insights:
+                        with st.expander("AI Insights", expanded=True):
+                            st.write(insights)
+
                 io_id_label = "_".join(str(i) for i in selected_io_ids)
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     output_path = Path(tmp_dir) / f"report_{io_id_label}_{data.report_start}_{data.report_end}.xlsx"
-                    write_report(data, TEMPLATE_PATH, str(output_path))
+                    write_report(data, TEMPLATE_PATH, str(output_path), insights=insights)
                     report_bytes = output_path.read_bytes()
 
                 st.download_button(

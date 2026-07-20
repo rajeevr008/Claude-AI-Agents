@@ -27,12 +27,19 @@ any resizing, so we only insert extra rows if the date range exceeds it.
 from copy import copy
 
 import pandas as pd
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from dv360_pipeline.models import CampaignBurstData
 
 IO_NAME_SHEET = "IO_name"
+
+# AI insights block — sits in the empty area right of the metadata (columns
+# F-L, rows 5-20), above the first breakdown section (row 17), so section
+# resizing never shifts it. Columns F-L are free of merged cells in the template.
+INSIGHTS_HEADER_CELL = "F5"
+INSIGHTS_BODY_RANGE = "F6:L20"
 
 CAMPAIGN_NAME_CELL = "C6"
 FLIGHT_START_CELL = "C7"
@@ -153,11 +160,27 @@ def _write_section(
     return total_row - total_row_template
 
 
-def write_report(data: CampaignBurstData, template_path: str, output_path: str) -> None:
+def _write_insights(ws: Worksheet, insights: str) -> None:
+    header = ws[INSIGHTS_HEADER_CELL]
+    header.value = "AI Insights"
+    header.font = Font(bold=True)
+
+    ws.merge_cells(INSIGHTS_BODY_RANGE)
+    top_left = ws[INSIGHTS_BODY_RANGE.split(":")[0]]
+    top_left.value = insights
+    top_left.alignment = Alignment(wrap_text=True, vertical="top", horizontal="left")
+
+
+def write_report(
+    data: CampaignBurstData, template_path: str, output_path: str, insights: str | None = None
+) -> None:
     import openpyxl
 
     wb = openpyxl.load_workbook(template_path)
     ws = wb[IO_NAME_SHEET]
+
+    if insights:
+        _write_insights(ws, insights)
 
     ws[CAMPAIGN_NAME_CELL] = data.meta.campaign_name
     ws[FLIGHT_START_CELL] = data.meta.flight_start

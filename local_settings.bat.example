@@ -4,3 +4,4 @@ REM your real credentials path) and fill in the real path below.
 REM run_app.bat picks this up automatically if it exists.
 
 set GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\your\service-account-key.json
+set ANTHROPIC_API_KEY=sk-ant-your-key-here

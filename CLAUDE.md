@@ -1,8 +1,23 @@
-# DV360 Reporting Pipeline — Layers 4 & 5
+# DV360 Reporting Pipeline — Layers 4 & 5 (+ AI Insights)
 
 Layers 1-3 (raw DV360 ingestion, cleaning into BigQuery) are already done and
 out of scope here. This repo is Layer 4 (BigQuery query module) and Layer 5
-(Excel template writer).
+(Excel template writer). This "Insights" variant additionally generates
+AI-written campaign insights (via the Claude API) into the report.
+
+## AI Insights (`src/dv360_pipeline/insights.py`)
+
+`generate_insights(data)` sends the full burst data (metadata + pacing + all
+six breakdowns) to Claude (`claude-opus-4-8`) with a system prompt casting it
+as an experienced advertising trader, and returns 4-6 numbered, actionable,
+plain-text insights each grounded in a specific metric. `write_report(...,
+insights=...)` places them in a merged block at `F6:L20` on the `IO_name`
+sheet (right of the metadata, above the breakdown sections so row resizing
+never shifts them; verified free of template merged cells). The app has a
+"Generate AI insights" checkbox (default on); if the API call fails
+(`InsightsError` — missing/invalid key, network, refusal) the report is still
+written **without** insights rather than failing. Auth: `ANTHROPIC_API_KEY`
+env var (add it to `local_settings.bat` alongside the GCP key — never commit).
 
 ## GCP / BigQuery
 
