@@ -12,7 +12,7 @@ class CampaignMeta:
     budget: float
     guaranteed_rate: float | str
     kpi: str
-    channel: str
+    product: str
     flight_start: date
     flight_end: date
 

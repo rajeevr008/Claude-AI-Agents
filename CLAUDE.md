@@ -18,9 +18,15 @@ out of scope here. This repo is Layer 4 (BigQuery query module) and Layer 5
   - **Device** (`sg_device_breakdown_v2`): daily grain, broken out by
     `device_type`. Carries video and audio quartiles.
   - **campaign_mapping**: one row per IO. Columns: `campaign_name`,
-    `io_name`, `io_id`, `budget`, `guaranteedrate`, `kpi`, `channel`,
-    `start_date`, `end_date`. This is the only source of budget/spend-rate
-    info — none of the breakdown tables have a cost/spend column.
+    `io_name`, `io_id`, `Product`, `Currency`, `Budget`, `start_date`,
+    `end_date`, `kpi_type`, `Buying_Method`, `guaranteedrate`,
+    `KPI_Inventory`. This is the only source of budget/spend-rate info —
+    none of the breakdown tables have a cost/spend column. Spend keys on
+    `kpi_type` (normalized); `Product` (e.g. DOOH, Demand Gen) fills the
+    `CampaignMeta.product` field. Note the mixed casing (`Budget`,
+    `Product`, `Currency`, `Buying_Method`, `KPI_Inventory`) vs the
+    lower-case breakdown/`guaranteedrate` columns; the SQL aliases them to
+    lower-case. Some rows have a null `io_id`.
 
 Shared metric columns on the breakdown tables: `impressions`, `clicks`,
 `trueview_views`, `video_q25`/`video_q50`/`video_q75`/`video_q100`, and
@@ -35,7 +41,7 @@ JSON). Never commit credentials; `config/` is gitignored for this.
 
 ## Key business logic
 
-**Spend formula**: `campaign_mapping.kpi` selects both which column to sum
+**Spend formula**: `campaign_mapping.kpi_type` selects both which column to sum
 and which multiplier formula to apply — these differ by KPI type, so they're
 two separate lookups (`KPI_COLUMN_MAP` and `KPI_SPEND_FORMULA` in
 `query.py`). The `kpi` value is normalized (stripped + lower-cased) before
@@ -89,10 +95,10 @@ export, best-effort filled), `Sheet1` (static lookup table, untouched).
 |---|---|---|
 | C6 | Campaign Name | `campaign_mapping.campaign_name` |
 | C7 / D7 | Flight start / end | `campaign_mapping.start_date` / `end_date` |
-| C9 | Budget | `campaign_mapping.budget` |
+| C9 | Budget | `campaign_mapping.Budget` |
 | C10 | Spend | computed (see spend formula) |
 | C11 | Guaranteed Rate | `campaign_mapping.guaranteedrate` |
-| C12 | KPI | `campaign_mapping.kpi` |
+| C12 | KPI | `campaign_mapping.kpi_type` |
 | C14 / D14 | Reporting Date Range start / end | function params |
 | E7 | Pace | template formula `=C10/C9`, untouched |
 | E9 | Ideal | template formula `=(D14-C14)/(D7-C7)`, untouched |
@@ -187,5 +193,5 @@ Auth via `gcloud auth application-default login` or
   this repo.
 - `KPI_COLUMN_MAP`/`KPI_SPEND_FORMULA` cover the eight known KPI types
   (trueview views, impressions, clicks, the four video quartiles, and audio
-  complete listens) — extend both dicts if `campaign_mapping.kpi` gets new
+  complete listens) — extend both dicts if `campaign_mapping.kpi_type` gets new
   values.

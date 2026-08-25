@@ -130,7 +130,7 @@ if "ios_df" in st.session_state:
             "budget": st.column_config.NumberColumn("Budget", format="$%.2f", disabled=True),
             "guaranteedrate": st.column_config.NumberColumn("Guaranteed Rate", disabled=True),
             "kpi": st.column_config.TextColumn("KPI", disabled=True),
-            "channel": st.column_config.TextColumn("Channel", disabled=True),
+            "product": st.column_config.TextColumn("Product", disabled=True),
             "start_date": st.column_config.DateColumn("Flight Start", disabled=True),
             "end_date": st.column_config.DateColumn("Flight End", disabled=True),
         },

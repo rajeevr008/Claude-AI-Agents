@@ -121,8 +121,8 @@ def _run_query(client: bigquery.Client, sql: str, params: list) -> pd.DataFrame:
 
 def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     sql = f"""
-        SELECT campaign_name, io_name, io_id, budget, guaranteedrate, kpi,
-               channel, start_date, end_date
+        SELECT campaign_name, io_name, io_id, Budget AS budget, guaranteedrate,
+               kpi_type AS kpi, Product AS product, start_date, end_date
         FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
         WHERE io_id = @io_id
         LIMIT 1
@@ -133,15 +133,15 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     if df.empty:
         raise CampaignNotFoundError(
             f"No row in campaign_mapping for io_id={io_id}. "
-            "Add an entry there (campaign_name, io_name, io_id, budget, "
-            "guaranteedrate, kpi, channel, start_date, end_date) before running a report."
+            "Add an entry there (campaign_name, io_name, io_id, Budget, "
+            "guaranteedrate, kpi_type, Product, start_date, end_date) before running a report."
         )
 
     row = df.iloc[0]
     kpi = _normalize_kpi(row["kpi"])
     if kpi not in KPI_COLUMN_MAP:
         raise UnknownKpiError(
-            f"campaign_mapping.kpi={row['kpi']!r} for io_id={io_id} has no mapping "
+            f"campaign_mapping.kpi_type={row['kpi']!r} for io_id={io_id} has no mapping "
             f"to a breakdown-table column. Known kpi values: {list(KPI_COLUMN_MAP)}. "
             "Add a mapping in KPI_COLUMN_MAP and KPI_SPEND_FORMULA if this is a "
             "new, valid KPI."
@@ -154,7 +154,7 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
         budget=float(row["budget"]),
         guaranteed_rate=float(row["guaranteedrate"]),
         kpi=kpi,
-        channel=row["channel"],
+        product=row["product"],
         flight_start=row["start_date"],
         flight_end=row["end_date"],
     )
@@ -164,7 +164,8 @@ def list_ios_for_campaign(campaign_name: str) -> pd.DataFrame:
     """All IOs under a campaign_name, for the app's IO picker table."""
     client = bigquery.Client(project=PROJECT_ID)
     sql = f"""
-        SELECT io_id, io_name, budget, guaranteedrate, kpi, channel, start_date, end_date
+        SELECT io_id, io_name, Budget AS budget, guaranteedrate,
+               kpi_type AS kpi, Product AS product, start_date, end_date
         FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
         WHERE LOWER(campaign_name) LIKE LOWER(CONCAT('%', @campaign_name, '%'))
         ORDER BY io_name
@@ -382,7 +383,7 @@ def fetch_combined_campaign_burst(
 
     guaranteed_rates = {m.guaranteed_rate for m in metas}
     kpis = {m.kpi for m in metas}
-    channels = {m.channel for m in metas}
+    products = {m.product for m in metas}
 
     combined_meta = CampaignMeta(
         campaign_name=metas[0].campaign_name,
@@ -391,7 +392,7 @@ def fetch_combined_campaign_burst(
         budget=sum(m.budget for m in metas),
         guaranteed_rate=guaranteed_rates.pop() if len(guaranteed_rates) == 1 else "Mixed",
         kpi=kpis.pop() if len(kpis) == 1 else "Mixed",
-        channel=channels.pop() if len(channels) == 1 else "Mixed",
+        product=products.pop() if len(products) == 1 else "Mixed",
         flight_start=min(m.flight_start for m in metas),
         flight_end=max(m.flight_end for m in metas),
     )

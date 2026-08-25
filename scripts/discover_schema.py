@@ -50,13 +50,14 @@ def describe_table(client: bigquery.Client, label: str, table_name: str) -> None
 def describe_distinct_kpi_values(client: bigquery.Client) -> None:
     table_ref = f"{PROJECT_ID}.{DATASET}.campaign_mapping"
     print("=" * 100)
-    print("CAMPAIGN_MAPPING: distinct kpi and channel values")
+    print("CAMPAIGN_MAPPING: distinct kpi_type / Buying_Method / Product values")
     print("=" * 100)
     rows = client.query(
-        f"SELECT DISTINCT kpi, channel FROM `{table_ref}` ORDER BY kpi, channel"
+        f"SELECT DISTINCT kpi_type, Buying_Method, Product FROM `{table_ref}` "
+        "ORDER BY kpi_type, Buying_Method, Product"
     ).result()
     for row in rows:
-        print(f"  kpi={row.kpi!r}  channel={row.channel!r}")
+        print(f"  kpi_type={row.kpi_type!r}  Buying_Method={row.Buying_Method!r}  Product={row.Product!r}")
     print()
 
 
