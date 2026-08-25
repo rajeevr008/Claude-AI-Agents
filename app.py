@@ -127,10 +127,11 @@ if "ios_df" in st.session_state:
             "Combine": st.column_config.CheckboxColumn("Combine"),
             "io_id": st.column_config.NumberColumn("Insertion Order ID", format="%d", disabled=True),
             "io_name": st.column_config.TextColumn("IO Name", disabled=True),
-            "budget": st.column_config.NumberColumn("Budget", format="$%.2f", disabled=True),
+            "budget": st.column_config.NumberColumn("Budget", format="%.2f", disabled=True),
+            "currency": st.column_config.TextColumn("Currency", disabled=True),
             "guaranteedrate": st.column_config.NumberColumn("Guaranteed Rate", disabled=True),
             "kpi": st.column_config.TextColumn("KPI", disabled=True),
-            "channel": st.column_config.TextColumn("Channel", disabled=True),
+            "product": st.column_config.TextColumn("Product", disabled=True),
             "start_date": st.column_config.DateColumn("Flight Start", disabled=True),
             "end_date": st.column_config.DateColumn("Flight End", disabled=True),
         },
@@ -173,11 +174,17 @@ if "ios_df" in st.session_state:
             else:
                 st.success(f"Fetched data for **{data.meta.campaign_name}** ({data.meta.io_name})")
 
+                cur = data.meta.currency
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Budget", f"${data.meta.budget:,.2f}")
-                col2.metric("Spend", f"${data.spend:,.2f}")
+                col1.metric("Budget", f"{cur} {data.meta.budget:,.2f}")
+                col2.metric("Spend", f"{cur} {data.spend:,.2f}")
                 col3.metric("Pace", f"{data.spend / data.meta.budget:.1%}" if data.meta.budget else "N/A")
                 col4.metric("KPI", str(data.meta.kpi))
+                if cur == "Mixed":
+                    st.warning(
+                        "Selected IOs span multiple currencies — Budget and Spend are "
+                        "summed without FX conversion and are not directly comparable."
+                    )
                 st.write(f"Reporting range: **{data.report_start}** to **{data.report_end}**")
                 if len(selected_io_ids) > 1:
                     st.caption(f"Combined from {len(selected_io_ids)} insertion orders: {selected_io_ids}")

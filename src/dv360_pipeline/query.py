@@ -18,33 +18,80 @@ from dv360_pipeline.models import CampaignBurstData, CampaignMeta
 PROJECT_ID = "ssc-apex-apac-prd-mg"
 DATASET = "apex_dv360"
 
-CREATIVE_TABLE = "SG_creative_rpt_aiagent_dv360_607124520_1677971342_20260101_20260630_20260629_220348"
-DEMO_TABLE = "sg_demo_aiagent_dv360_607124520_1677978667_20260101_20260630_20260629_224448"
-DEVICE_TABLE = "sg_device_rpt_dv360_607124520_1677976737_20260101_20260630_20260629_222138"
+CREATIVE_TABLE = "sg_creative_breakdown_v2"
+DEMO_TABLE = "sg_demo_breakdown_v2"
+DEVICE_TABLE = "sg_device_breakdown_v2"
 CAMPAIGN_MAPPING_TABLE = "campaign_mapping"
 
-# Maps campaign_mapping.kpi values to the source column they're measured
-# against.
+# campaign_mapping.kpi selects BOTH the metric column to sum (KPI_COLUMN_MAP)
+# and the spend multiplier formula (KPI_SPEND_FORMULA). Keys are the kpi
+# string normalized via _normalize_kpi (stripped + lower-cased) so minor
+# casing/whitespace differences in the mapping table don't cause misses.
+#
+# kpi type                        buying method        formula
+# ------------------------------  -------------------  --------------------------------
+# trueview: views                 CPV                  trueview_views * rate
+# impressions                     CPM                  (impressions / 1000) * rate
+# complete views (video)          CPCV                 video_q100 * rate
+# clicks                          CPC                  clicks * rate
+# first-quartile views (video)    CPV (1st Quartile)   video_q25 * rate
+# midpoint views (video)          CPV (midpoint)       video_q50 * rate
+# third-quartile views (video)    CPV (3rd Quartile)   video_q75 * rate
+# complete listens (audio)        (audio)              audio_q100 * rate
 KPI_COLUMN_MAP = {
-    "clicks": "clicks",
-    "views": "youtube_views",
+    "trueview: views": "trueview_views",
     "impressions": "impressions",
-    "completed views": "video_100",  # rich_media_video_completions
+    "complete views (video)": "video_q100",
+    "clicks": "clicks",
+    "first-quartile views (video)": "video_q25",
+    "midpoint views (video)": "video_q50",
+    "third-quartile views (video)": "video_q75",
+    "complete listens (audio)": "audio_q100",
 }
 
-# Spend formula differs by KPI type:
-#   clicks / views / completed views -> guaranteed_rate * SUM(kpi_column)
-#   impressions -> CPM formula: guaranteed_rate * SUM(impressions) / 1000
+# Every buying method is rate * SUM(column) except CPM (impressions), which
+# divides by 1000.
 KPI_SPEND_FORMULA = {
-    "clicks": lambda value, rate: value * rate,
-    "views": lambda value, rate: value * rate,
+    "trueview: views": lambda value, rate: value * rate,
     "impressions": lambda value, rate: value * rate / 1000,
-    "completed views": lambda value, rate: value * rate,
+    "complete views (video)": lambda value, rate: value * rate,
+    "clicks": lambda value, rate: value * rate,
+    "first-quartile views (video)": lambda value, rate: value * rate,
+    "midpoint views (video)": lambda value, rate: value * rate,
+    "third-quartile views (video)": lambda value, rate: value * rate,
+    "complete listens (audio)": lambda value, rate: value * rate,
 }
+
+
+def _normalize_kpi(kpi):
+    """Normalize a campaign_mapping.kpi value for lookup in the KPI dicts."""
+    return kpi.strip().lower() if isinstance(kpi, str) else kpi
 
 
 def _compute_spend(value, kpi: str, guaranteed_rate: float):
     return KPI_SPEND_FORMULA[kpi](value, guaranteed_rate)
+
+
+# Shared metric aggregation for the conformed breakdown tables. Video
+# quartiles exist on every breakdown; audio quartiles only exist on the
+# creative and device tables (the demo/YouTube table has no audio), so they
+# are appended separately.
+_VIDEO_METRIC_AGG = """
+            IFNULL(SUM(impressions), 0) AS impressions,
+            IFNULL(SUM(trueview_views), 0) AS trueview_views,
+            IFNULL(SUM(clicks), 0) AS clicks,
+            IFNULL(SUM(video_q25), 0) AS video_q25,
+            IFNULL(SUM(video_q50), 0) AS video_q50,
+            IFNULL(SUM(video_q75), 0) AS video_q75,
+            IFNULL(SUM(video_q100), 0) AS video_q100"""
+
+_AUDIO_METRIC_AGG = """,
+            IFNULL(SUM(audio_q25), 0) AS audio_q25,
+            IFNULL(SUM(audio_q50), 0) AS audio_q50,
+            IFNULL(SUM(audio_q75), 0) AS audio_q75,
+            IFNULL(SUM(audio_q100), 0) AS audio_q100"""
+
+_METRIC_AGG = _VIDEO_METRIC_AGG + _AUDIO_METRIC_AGG
 
 
 class CampaignNotFoundError(Exception):
@@ -74,8 +121,8 @@ def _run_query(client: bigquery.Client, sql: str, params: list) -> pd.DataFrame:
 
 def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     sql = f"""
-        SELECT campaign_name, io_name, io_id, budget, guaranteedrate, kpi,
-               channel, start_date, end_date
+        SELECT campaign_name, io_name, io_id, Budget AS budget, Currency AS currency,
+               guaranteedrate, kpi_type AS kpi, Product AS product, start_date, end_date
         FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
         WHERE io_id = @io_id
         LIMIT 1
@@ -86,16 +133,18 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     if df.empty:
         raise CampaignNotFoundError(
             f"No row in campaign_mapping for io_id={io_id}. "
-            "Add an entry there (campaign_name, io_name, io_id, budget, "
-            "guaranteedrate, kpi, channel, start_date, end_date) before running a report."
+            "Add an entry there (campaign_name, io_name, io_id, Budget, "
+            "guaranteedrate, kpi_type, Product, start_date, end_date) before running a report."
         )
 
     row = df.iloc[0]
-    if row["kpi"] not in KPI_COLUMN_MAP:
+    kpi = _normalize_kpi(row["kpi"])
+    if kpi not in KPI_COLUMN_MAP:
         raise UnknownKpiError(
-            f"campaign_mapping.kpi={row['kpi']!r} for io_id={io_id} has no mapping "
-            f"to a creative-table column. Known kpi values: {list(KPI_COLUMN_MAP)}. "
-            "Add a mapping in KPI_COLUMN_MAP if this is a new, valid KPI."
+            f"campaign_mapping.kpi_type={row['kpi']!r} for io_id={io_id} has no mapping "
+            f"to a breakdown-table column. Known kpi values: {list(KPI_COLUMN_MAP)}. "
+            "Add a mapping in KPI_COLUMN_MAP and KPI_SPEND_FORMULA if this is a "
+            "new, valid KPI."
         )
 
     return CampaignMeta(
@@ -103,9 +152,10 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
         io_name=row["io_name"],
         io_id=int(row["io_id"]),
         budget=float(row["budget"]),
+        currency=row["currency"],
         guaranteed_rate=float(row["guaranteedrate"]),
-        kpi=row["kpi"],
-        channel=row["channel"],
+        kpi=kpi,
+        product=row["product"],
         flight_start=row["start_date"],
         flight_end=row["end_date"],
     )
@@ -115,9 +165,11 @@ def list_ios_for_campaign(campaign_name: str) -> pd.DataFrame:
     """All IOs under a campaign_name, for the app's IO picker table."""
     client = bigquery.Client(project=PROJECT_ID)
     sql = f"""
-        SELECT io_id, io_name, budget, guaranteedrate, kpi, channel, start_date, end_date
+        SELECT io_id, io_name, Budget AS budget, Currency AS currency, guaranteedrate,
+               kpi_type AS kpi, Product AS product, start_date, end_date
         FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
         WHERE LOWER(campaign_name) LIKE LOWER(CONCAT('%', @campaign_name, '%'))
+          AND io_id IS NOT NULL
         ORDER BY io_name
     """
     params = [bigquery.ScalarQueryParameter("campaign_name", "STRING", campaign_name)]
@@ -127,14 +179,7 @@ def list_ios_for_campaign(campaign_name: str) -> pd.DataFrame:
 def _creative_agg_sql(select_expr: str, group_by: str) -> str:
     return f"""
         SELECT
-            {select_expr},
-            IFNULL(SUM(impressions), 0) AS impressions,
-            IFNULL(SUM(youtube_views), 0) AS youtube_views,
-            IFNULL(SUM(clicks), 0) AS clicks,
-            IFNULL(SUM(rich_media_video_first_quartile_completes), 0) AS video_25,
-            IFNULL(SUM(rich_media_video_midpoints), 0) AS video_50,
-            IFNULL(SUM(rich_media_video_third_quartile_completes), 0) AS video_75,
-            IFNULL(SUM(rich_media_video_completions), 0) AS video_100
+            {select_expr},{_METRIC_AGG}
         FROM {_table_ref(CREATIVE_TABLE)}
         WHERE insertion_order_id = @io_id
           AND date BETWEEN @start_date AND @end_date
@@ -144,7 +189,7 @@ def _creative_agg_sql(select_expr: str, group_by: str) -> str:
 
 
 def _fetch_creative_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
-    sql = _creative_agg_sql("trueview_ad AS creative_name", "creative_name")
+    sql = _creative_agg_sql("creative AS creative_name", "creative_name")
     return _run_query(client, sql, _date_params(io_id, start_date, end_date))
 
 
@@ -170,15 +215,8 @@ def _fetch_data_template_df(client: bigquery.Client, io_id: int, start_date: dat
     sql = f"""
         SELECT
             date,
-            trueview_ad AS creative_name,
-            {targeting_expr},
-            IFNULL(SUM(impressions), 0) AS impressions,
-            IFNULL(SUM(youtube_views), 0) AS youtube_views,
-            IFNULL(SUM(clicks), 0) AS clicks,
-            IFNULL(SUM(rich_media_video_first_quartile_completes), 0) AS video_25,
-            IFNULL(SUM(rich_media_video_midpoints), 0) AS video_50,
-            IFNULL(SUM(rich_media_video_third_quartile_completes), 0) AS video_75,
-            IFNULL(SUM(rich_media_video_completions), 0) AS video_100
+            creative AS creative_name,
+            {targeting_expr},{_METRIC_AGG}
         FROM {_table_ref(CREATIVE_TABLE)}
         WHERE insertion_order_id = @io_id
           AND date BETWEEN @start_date AND @end_date
@@ -189,13 +227,10 @@ def _fetch_data_template_df(client: bigquery.Client, io_id: int, start_date: dat
 
 
 def _fetch_device_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
+    # Device table (like Creative) carries both video and audio quartiles.
     sql = f"""
         SELECT
-            device_type,
-            IFNULL(SUM(impressions), 0) AS impressions,
-            IFNULL(SUM(youtube_views), 0) AS youtube_views,
-            IFNULL(SUM(clicks), 0) AS clicks,
-            IFNULL(SUM(rich_media_video_completions), 0) AS video_100
+            device_type,{_METRIC_AGG}
         FROM {_table_ref(DEVICE_TABLE)}
         WHERE insertion_order_id = @io_id
           AND date BETWEEN @start_date AND @end_date
@@ -206,13 +241,12 @@ def _fetch_device_df(client: bigquery.Client, io_id: int, start_date: date, end_
 
 
 def _fetch_demo_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date, group_col: str) -> pd.DataFrame:
+    # Demo is YouTube-only and has no audio columns, so it uses the
+    # video-only metric aggregation. An audio-KPI IO therefore has no demo
+    # spend (handled by _add_spend_column when the column is absent).
     sql = f"""
         SELECT
-            {group_col},
-            IFNULL(SUM(impressions), 0) AS impressions,
-            IFNULL(SUM(youtube_views), 0) AS youtube_views,
-            IFNULL(SUM(clicks), 0) AS clicks,
-            IFNULL(SUM(rich_media_video_completions), 0) AS video_100
+            {group_col},{_VIDEO_METRIC_AGG}
         FROM {_table_ref(DEMO_TABLE)}
         WHERE insertion_order_id = @io_id
           AND date BETWEEN @start_date AND @end_date
@@ -225,7 +259,12 @@ def _fetch_demo_df(client: bigquery.Client, io_id: int, start_date: date, end_da
 def _add_spend_column(df: pd.DataFrame, kpi: str, guaranteed_rate: float) -> pd.DataFrame:
     kpi_column = KPI_COLUMN_MAP[kpi]
     df = df.copy()
-    df["spend"] = _compute_spend(df[kpi_column], kpi, guaranteed_rate)
+    # A breakdown may not carry the KPI's metric column (e.g. the demo table
+    # has no audio_* columns for an audio KPI); its spend is then zero.
+    if kpi_column not in df.columns:
+        df["spend"] = 0.0
+    else:
+        df["spend"] = _compute_spend(df[kpi_column], kpi, guaranteed_rate)
     return df
 
 
@@ -261,8 +300,8 @@ def fetch_campaign_burst(
     targeting_df = _fetch_targeting_df(client, io_id, start_date, end_date)
     date_df = _fetch_date_df(client, io_id, start_date, end_date)
     device_df = _fetch_device_df(client, io_id, start_date, end_date)
-    gender_df = _fetch_demo_df(client, io_id, start_date, end_date, "youtube_gender")
-    age_df = _fetch_demo_df(client, io_id, start_date, end_date, "youtube_age")
+    gender_df = _fetch_demo_df(client, io_id, start_date, end_date, "gender")
+    age_df = _fetch_demo_df(client, io_id, start_date, end_date, "age")
     data_template_df = _fetch_data_template_df(client, io_id, start_date, end_date)
 
     kpi_column = KPI_COLUMN_MAP[meta.kpi]
@@ -274,10 +313,10 @@ def fetch_campaign_burst(
     date_df = _add_spend_column(date_df, meta.kpi, meta.guaranteed_rate)
     data_template_df = _add_spend_column(data_template_df, meta.kpi, meta.guaranteed_rate)
 
-    # Device/gender/age tables don't carry every creative-table KPI column
-    # (e.g. no video-quartile-based spend split needed there); spend on
-    # these breakdowns uses whichever of clicks/youtube_views/impressions
-    # the KPI maps to, same as the creative-level breakdown.
+    # Device carries the same metric columns as Creative; the demo table is
+    # YouTube-only and has no audio columns, so an audio KPI yields zero demo
+    # spend (handled in _add_spend_column). Every breakdown's spend uses the
+    # KPI's own metric column, same as the creative-level breakdown.
     device_df = _add_spend_column(device_df, meta.kpi, meta.guaranteed_rate)
     gender_df = _add_spend_column(gender_df, meta.kpi, meta.guaranteed_rate)
     age_df = _add_spend_column(age_df, meta.kpi, meta.guaranteed_rate)
@@ -346,16 +385,21 @@ def fetch_combined_campaign_burst(
 
     guaranteed_rates = {m.guaranteed_rate for m in metas}
     kpis = {m.kpi for m in metas}
-    channels = {m.channel for m in metas}
+    products = {m.product for m in metas}
+    currencies = {m.currency for m in metas}
 
     combined_meta = CampaignMeta(
         campaign_name=metas[0].campaign_name,
         io_name=" + ".join(m.io_name for m in metas),
         io_id=list(io_ids),
+        # NB: budget/spend are summed in each IO's own currency; when the
+        # selected IOs span currencies this total is not FX-converted and
+        # `currency` becomes "Mixed" to flag it.
         budget=sum(m.budget for m in metas),
+        currency=currencies.pop() if len(currencies) == 1 else "Mixed",
         guaranteed_rate=guaranteed_rates.pop() if len(guaranteed_rates) == 1 else "Mixed",
         kpi=kpis.pop() if len(kpis) == 1 else "Mixed",
-        channel=channels.pop() if len(channels) == 1 else "Mixed",
+        product=products.pop() if len(products) == 1 else "Mixed",
         flight_start=min(m.flight_start for m in metas),
         flight_end=max(m.flight_end for m in metas),
     )
@@ -368,8 +412,8 @@ def fetch_combined_campaign_burst(
         creative_df=_combine_dfs([r.creative_df for r in results], ["creative_name"]),
         targeting_df=_combine_dfs([r.targeting_df for r in results], ["targeting"]),
         device_df=_combine_dfs([r.device_df for r in results], ["device_type"]),
-        gender_df=_combine_dfs([r.gender_df for r in results], ["youtube_gender"]),
-        age_df=_combine_dfs([r.age_df for r in results], ["youtube_age"]),
+        gender_df=_combine_dfs([r.gender_df for r in results], ["gender"]),
+        age_df=_combine_dfs([r.age_df for r in results], ["age"]),
         date_df=_combine_dfs([r.date_df for r in results], ["date"]),
         data_template_df=_combine_dfs(
             [r.data_template_df for r in results], ["date", "creative_name", "targeting"]

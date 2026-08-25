@@ -10,9 +10,10 @@ class CampaignMeta:
     io_name: str
     io_id: int | list[int]
     budget: float
+    currency: str
     guaranteed_rate: float | str
     kpi: str
-    channel: str
+    product: str
     flight_start: date
     flight_end: date
 
