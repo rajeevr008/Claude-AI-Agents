@@ -7,6 +7,7 @@ login, or GOOGLE_APPLICATION_CREDENTIALS pointing at a service account key).
 Nothing here reads or writes credentials directly.
 """
 
+import math
 from datetime import date
 
 import pandas as pd
@@ -292,6 +293,56 @@ def _fetch_demo_df(client, io_id, start_date, end_date, group_col, channel) -> p
     return _run_query(client, sql, _burst_params(io_id, start_date, end_date, channel))
 
 
+# Metric columns reconciled against the Creative breakdown (integer counts).
+_INT_METRIC_COLS = (
+    "impressions", "trueview_views", "clicks",
+    "video_q25", "video_q50", "video_q75", "video_q100",
+    "audio_q25", "audio_q50", "audio_q75", "audio_q100",
+)
+
+
+def _apportion(values: list[float], target: float, ndigits: int) -> list[float]:
+    """Scale `values` proportionally so their rounded total is exactly `target`
+    (at `ndigits` precision), distributing the rounding residual by largest
+    fractional part (Hamilton/largest-remainder). Preserves the input's shape."""
+    n = len(values)
+    if n == 0:
+        return []
+    current = sum(values)
+    if current <= 0:
+        return list(values)  # no distribution to scale from
+    factor = 10 ** ndigits
+    target_units = int(round(target * factor))
+    scaled = [v * target / current * factor for v in values]
+    base = [math.floor(s) for s in scaled]
+    residual = target_units - sum(base)
+    if residual:
+        order = sorted(range(n), key=lambda i: scaled[i] - base[i], reverse=True)
+        step = 1 if residual > 0 else -1
+        for k in range(abs(residual)):
+            base[order[k % n]] += step
+    return [b / factor for b in base]
+
+
+def _reconcile_to_creative(df: pd.DataFrame, creative_df: pd.DataFrame) -> pd.DataFrame:
+    """Force a breakdown's metric totals to match the Creative breakdown's
+    (Creative is authoritative), keeping the breakdown's own proportions.
+    Integer metrics stay integers; spend keeps 2 decimals; each rounded column
+    sums exactly to Creative's displayed total (the writer's SUM row)."""
+    if df.empty or creative_df.empty:
+        return df
+    df = df.copy()
+    for col in df.columns:
+        if col in _INT_METRIC_COLS and col in creative_df.columns:
+            target = int(round(float(creative_df[col].sum())))
+            df[col] = _apportion([float(v) for v in df[col]], target, 0)
+        elif col == "spend" and "spend" in creative_df.columns:
+            # Match the Creative Total as displayed: sum of per-row rounded spend.
+            target = float(sum(round(float(v), 2) for v in creative_df["spend"]))
+            df[col] = _apportion([float(v) for v in df[col]], target, 2)
+    return df
+
+
 def _add_spend_column(df: pd.DataFrame, kpi: str, guaranteed_rate: float) -> pd.DataFrame:
     kpi_column = KPI_COLUMN_MAP[kpi]
     df = df.copy()
@@ -360,6 +411,15 @@ def fetch_campaign_burst(
     device_df = _add_spend_column(device_df, meta.kpi, meta.guaranteed_rate)
     gender_df = _add_spend_column(gender_df, meta.kpi, meta.guaranteed_rate)
     age_df = _add_spend_column(age_df, meta.kpi, meta.guaranteed_rate)
+
+    # Creative is the source of truth: rescale every other breakdown's metric
+    # totals to match it, so Creative/Targeting/Device/Gender/Age/Date all
+    # reconcile (the device/demo tables can differ from creative by a few rows).
+    targeting_df = _reconcile_to_creative(targeting_df, creative_df)
+    date_df = _reconcile_to_creative(date_df, creative_df)
+    device_df = _reconcile_to_creative(device_df, creative_df)
+    gender_df = _reconcile_to_creative(gender_df, creative_df)
+    age_df = _reconcile_to_creative(age_df, creative_df)
 
     return CampaignBurstData(
         meta=meta,
