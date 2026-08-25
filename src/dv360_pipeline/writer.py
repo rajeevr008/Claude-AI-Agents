@@ -24,6 +24,7 @@ fixed-range Total formula; normal reporting windows fit inside that without
 any resizing, so we only insert extra rows if the date range exceeds it.
 """
 
+import re
 from copy import copy
 
 import pandas as pd
@@ -33,6 +34,51 @@ from openpyxl.worksheet.worksheet import Worksheet
 from dv360_pipeline.models import CampaignBurstData
 
 IO_NAME_SHEET = "IO_name"
+DATA_TEMPLATE_SHEET = "Data Template"
+
+# Excel worksheet-name constraints.
+EXCEL_SHEET_MAXLEN = 31
+_EXCEL_ILLEGAL_CHARS = re.compile(r"[:\\/?*\[\]]")
+
+
+def _io_sheet_label(io_name: str) -> str:
+    """Sheet label for an IO = its io_name's last two '-'-delimited segments
+    rejoined with '-' (e.g. '...-Video Reach Campaign-Burst 5' -> 'Video Reach
+    Campaign-Burst 5'). Confirmed against the client's naming sheet."""
+    parts = str(io_name).split("-")
+    return "-".join(parts[-2:]).strip()
+
+
+def _truncate_middle(text: str, limit: int) -> str:
+    """Shorten to `limit` chars keeping both ends (so trailing distinguishers
+    like 'Burst 7' survive), joining the halves with a single ellipsis."""
+    if len(text) <= limit:
+        return text
+    if limit <= 1:
+        return text[:limit]
+    keep = limit - 1  # room for the ellipsis
+    head = (keep + 1) // 2
+    tail = keep - head
+    return text[:head] + "…" + (text[-tail:] if tail else "")
+
+
+def _excel_safe_sheet_name(label: str, used: set) -> str:
+    """Make `label` a valid, unique Excel sheet name: strip illegal chars,
+    fit within 31 chars, and de-duplicate case-insensitively with a numeric
+    suffix (Excel treats sheet names case-insensitively for uniqueness)."""
+    name = _EXCEL_ILLEGAL_CHARS.sub(" ", str(label)).strip() or "IO"
+    name = _truncate_middle(name, EXCEL_SHEET_MAXLEN)
+    if name.casefold() not in used:
+        used.add(name.casefold())
+        return name
+    i = 2
+    while True:
+        suffix = f" ({i})"
+        candidate = _truncate_middle(name, EXCEL_SHEET_MAXLEN - len(suffix)) + suffix
+        if candidate.casefold() not in used:
+            used.add(candidate.casefold())
+            return candidate
+        i += 1
 
 CAMPAIGN_NAME_CELL = "C6"
 FLIGHT_START_CELL = "C7"
@@ -154,12 +200,9 @@ def _write_section(
     return total_row - total_row_template
 
 
-def write_report(data: CampaignBurstData, template_path: str, output_path: str) -> None:
-    import openpyxl
-
-    wb = openpyxl.load_workbook(template_path)
-    ws = wb[IO_NAME_SHEET]
-
+def _fill_io_name_sheet(ws: Worksheet, data: CampaignBurstData) -> None:
+    """Fill one IO_name-style report sheet (header cells + the six breakdown
+    sections) in place. Shared by the single- and multi-IO writers."""
     ws[CAMPAIGN_NAME_CELL] = data.meta.campaign_name
     ws[FLIGHT_START_CELL] = data.meta.flight_start
     ws[FLIGHT_END_CELL] = data.meta.flight_end
@@ -172,46 +215,83 @@ def write_report(data: CampaignBurstData, template_path: str, output_path: str) 
     ws[REPORT_END_CELL] = data.report_end
 
     offset = 0
-
     delta = _write_section(ws, 17 + offset, 19 + offset, data.creative_df, "creative_name", has_quartiles=True)
     offset += delta
-
     delta = _write_section(ws, 21 + offset, 26 + offset, data.targeting_df, "targeting", has_quartiles=False)
     offset += delta
-
     delta = _write_section(ws, 28 + offset, 33 + offset, data.device_df, "device_type", has_quartiles=False)
     offset += delta
-
     delta = _write_section(ws, 35 + offset, 38 + offset, data.gender_df, "gender", has_quartiles=False)
     offset += delta
-
     delta = _write_section(ws, 40 + offset, 43 + offset, data.age_df, "age", has_quartiles=False)
     offset += delta
+    _write_section(ws, 45 + offset, 102 + offset, data.date_df, "date", has_quartiles=False, fixed_capacity=True)
 
-    delta = _write_section(
-        ws, 45 + offset, 102 + offset, data.date_df, "date", has_quartiles=False, fixed_capacity=True
-    )
-    offset += delta
 
-    _write_data_template_sheet(wb, data)
+def write_report(data: CampaignBurstData, template_path: str, output_path: str) -> None:
+    """Single-IO report: fill the template's IO_name and Data Template sheets."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(template_path)
+    _fill_io_name_sheet(wb[IO_NAME_SHEET], data)
+    _write_data_template_sheet(wb, [data])
+    wb.save(output_path)
+
+
+def write_multi_io_report(datas: list[CampaignBurstData], template_path: str, output_path: str) -> None:
+    """Multi-IO report: one IO_name-style sheet per IO (named by
+    _io_sheet_label), plus a single combined Data Template with every IO's
+    detail rows, and the static Sheet1 left untouched.
+
+    Falls back to the single-IO writer for one IO. Report sheets are ordered
+    first, then Data Template, then Sheet1.
+    """
+    import openpyxl
+
+    if not datas:
+        raise ValueError("datas must not be empty")
+    if len(datas) == 1:
+        return write_report(datas[0], template_path, output_path)
+
+    wb = openpyxl.load_workbook(template_path)
+    template_io = wb[IO_NAME_SHEET]
+
+    # Copy the pristine template sheet once per IO *before* filling any of
+    # them, so every copy starts from the unfilled template.
+    io_sheets = [template_io] + [wb.copy_worksheet(template_io) for _ in range(len(datas) - 1)]
+
+    # Seed with the retained sheets so an IO's computed name can't collide.
+    used_names: set = {DATA_TEMPLATE_SHEET.casefold(), "sheet1"}
+    for ws, data in zip(io_sheets, datas):
+        ws.title = _excel_safe_sheet_name(_io_sheet_label(data.meta.io_name), used_names)
+        _fill_io_name_sheet(ws, data)
+
+    _write_data_template_sheet(wb, datas)
+
+    # Order: all IO report sheets, then Data Template, then Sheet1.
+    tail = [wb[name] for name in (DATA_TEMPLATE_SHEET, "Sheet1") if name in wb.sheetnames]
+    wb._sheets = io_sheets + tail
 
     wb.save(output_path)
 
 
-def _write_data_template_sheet(wb, data: CampaignBurstData) -> None:
-    ws = wb["Data Template"]
+def _write_data_template_sheet(wb, datas: list[CampaignBurstData]) -> None:
+    """Fill the Data Template sheet, stacking every IO's detail rows below the
+    header (row 2). One IO for the single-IO report, all IOs for a multi-IO one."""
+    ws = wb[DATA_TEMPLATE_SHEET]
     row = 3  # header is row 2
-    for r in data.data_template_df.itertuples(index=False):
-        ws.cell(row=row, column=1, value=r.date)                     # Date
-        ws.cell(row=row, column=7, value=data.meta.campaign_name)    # Campaign Name
-        ws.cell(row=row, column=9, value=r.creative_name)            # Creative
-        ws.cell(row=row, column=10, value=r.targeting)               # Strategy
-        ws.cell(row=row, column=15, value=round(float(r.spend), 2))  # Cost
-        ws.cell(row=row, column=16, value=int(r.impressions))        # Impressions
-        ws.cell(row=row, column=17, value=int(r.clicks))             # Clicks
-        ws.cell(row=row, column=20, value=int(r.trueview_views))     # Video Views
-        ws.cell(row=row, column=21, value=int(r.video_q25))          # 25% Completed View
-        ws.cell(row=row, column=22, value=int(r.video_q50))          # 50% Completed View
-        ws.cell(row=row, column=23, value=int(r.video_q75))          # 75% Completed View
-        ws.cell(row=row, column=24, value=int(r.video_q100))         # 100% Completed View
-        row += 1
+    for data in datas:
+        for r in data.data_template_df.itertuples(index=False):
+            ws.cell(row=row, column=1, value=r.date)                     # Date
+            ws.cell(row=row, column=7, value=data.meta.campaign_name)    # Campaign Name
+            ws.cell(row=row, column=9, value=r.creative_name)            # Creative
+            ws.cell(row=row, column=10, value=r.targeting)               # Strategy
+            ws.cell(row=row, column=15, value=round(float(r.spend), 2))  # Cost
+            ws.cell(row=row, column=16, value=int(r.impressions))        # Impressions
+            ws.cell(row=row, column=17, value=int(r.clicks))             # Clicks
+            ws.cell(row=row, column=20, value=int(r.trueview_views))     # Video Views
+            ws.cell(row=row, column=21, value=int(r.video_q25))          # 25% Completed View
+            ws.cell(row=row, column=22, value=int(r.video_q50))          # 50% Completed View
+            ws.cell(row=row, column=23, value=int(r.video_q75))          # 75% Completed View
+            ws.cell(row=row, column=24, value=int(r.video_q100))         # 100% Completed View
+            row += 1

@@ -374,6 +374,18 @@ def fetch_campaign_burst(
     )
 
 
+def fetch_separate_campaign_bursts(
+    io_ids: list[int], start_date: date | None = None, end_date: date | None = None
+) -> list[CampaignBurstData]:
+    """One CampaignBurstData per IO (kept separate, not merged) for the
+    "separate sheet per IO" export. If start_date/end_date are omitted, each
+    IO uses its own flight range from campaign_mapping.
+    """
+    if not io_ids:
+        raise ValueError("io_ids must not be empty")
+    return [fetch_campaign_burst(io_id, start_date, end_date) for io_id in io_ids]
+
+
 def _combine_dfs(dfs: list[pd.DataFrame], group_cols: list[str]) -> pd.DataFrame:
     non_empty = [df for df in dfs if not df.empty]
     if not non_empty:
