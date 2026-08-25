@@ -24,7 +24,9 @@ out of scope here. This repo is Layer 4 (BigQuery query module) and Layer 5
     none of the breakdown tables have a cost/spend column. Spend keys on
     `kpi_type` (normalized); `Product` (e.g. DOOH, Demand Gen) fills the
     `CampaignMeta.product` field; `Currency` fills `CampaignMeta.currency`
-    (written to cell C8, and used for Budget/Spend display in the app).
+    (written to cell C8, and used for Budget/Spend display in the app);
+    `KPI_Inventory` fills `CampaignMeta.kpi_inventory` (written to cell C13,
+    summed across IOs when combining).
     Note the mixed casing (`Budget`, `Product`, `Currency`, `Buying_Method`,
     `KPI_Inventory`) vs the lower-case breakdown/`guaranteedrate` columns;
     the SQL aliases them to lower-case. Some rows have a **null `io_id`** —
@@ -117,13 +119,22 @@ export, best-effort filled), `Sheet1` (static lookup table, untouched).
 | C10 | Spend | computed (see spend formula) |
 | C11 | Guaranteed Rate | `campaign_mapping.guaranteedrate` |
 | C12 | KPI | `campaign_mapping.kpi_type` |
-| C14 / D14 | Reporting Date Range start / end | function params |
+| C13 | KPI Inventory | `campaign_mapping.KPI_Inventory` |
+| C14 / D14 | Reporting Date Range start / end | start = param; **end = last date present in the Date breakdown** (falls back to the param end if there's no data) |
 | E7 | Pace | template formula `=C10/C9`, untouched |
 | E9 | Ideal | template formula `=(D14-C14)/(D7-C7)`, untouched |
 
+The template ships with `KPI:` as a two-row merged block (`B12:B13`).
+`_split_kpi_inventory_row` unmerges it into `KPI:` (row 12) and a new
+`KPI Inventory:` (row 13); the value cell `C13:D13` already exists in the
+template (merged, `#,##0`). All report dates (C7/D7, C14/D14, the Date
+breakdown's B column, and the Data Template's Date column) are written with
+number format `DD/MM/YYYY`.
+
 Pace/Ideal are left as native Excel formulas — their inputs are fixed
 single cells that never move, so the formulas stay valid regardless of how
-the breakdown sections below grow or shrink.
+the breakdown sections below grow or shrink. Note `D14` now reflects the
+last date with data, so `Ideal` measures pace against delivered days.
 
 ### IO_name sheet — breakdown sections (dynamically resized)
 

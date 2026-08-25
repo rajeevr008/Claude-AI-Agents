@@ -13,6 +13,7 @@ class CampaignMeta:
     currency: str
     guaranteed_rate: float | str
     kpi: str
+    kpi_inventory: float | None
     product: str
     flight_start: date
     flight_end: date

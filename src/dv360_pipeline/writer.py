@@ -24,6 +24,7 @@ fixed-range Total formula; normal reporting windows fit inside that without
 any resizing, so we only insert extra rows if the date range exceeds it.
 """
 
+import datetime as _dt
 import re
 from copy import copy
 
@@ -32,6 +33,18 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from dv360_pipeline.models import CampaignBurstData
+
+
+def _to_date(value):
+    """Normalize a pandas Timestamp / datetime to a plain date for Excel;
+    pass other values through unchanged."""
+    if value is None:
+        return value
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if isinstance(value, _dt.datetime):
+        return value.date()
+    return value
 
 IO_NAME_SHEET = "IO_name"
 DATA_TEMPLATE_SHEET = "Data Template"
@@ -88,8 +101,15 @@ BUDGET_CELL = "C9"
 SPEND_CELL = "C10"
 GUARANTEED_RATE_CELL = "C11"
 KPI_CELL = "C12"
+KPI_LABEL_CELL = "B12"
+KPI_INVENTORY_LABEL_CELL = "B13"
+KPI_INVENTORY_VALUE_CELL = "C13"  # template already merges C13:D13 with #,##0
+KPI_MERGE = "B12:B13"
 REPORT_START_CELL = "C14"
 REPORT_END_CELL = "D14"
+
+# All dates in the report render day/month/year.
+DATE_FORMAT = "DD/MM/YYYY"
 
 # name_col: 1-indexed column for the row label (B=2)
 NAME_COL = 2
@@ -170,7 +190,10 @@ def _write_section(
 
     for i, row in enumerate(df.itertuples(index=False)):
         r = data_start + i
-        ws.cell(row=r, column=NAME_COL, value=getattr(row, name_column))
+        name_value = _to_date(getattr(row, name_column))
+        name_cell = ws.cell(row=r, column=NAME_COL, value=name_value)
+        if isinstance(name_value, _dt.date):  # Date breakdown -> DD/MM/YYYY
+            name_cell.number_format = DATE_FORMAT
         ws.cell(row=r, column=IMPRESSIONS_COL, value=int(row.impressions))
         ws.cell(row=r, column=TRUEVIEW_COL, value=int(row.trueview_views))
         ws.cell(row=r, column=SPEND_COL, value=round(float(row.spend), 2))
@@ -209,6 +232,21 @@ def _copy_sheet_view(src_ws: Worksheet, dst_ws: Worksheet) -> None:
     dst_ws.sheet_view.zoomScale = src_ws.sheet_view.zoomScale
 
 
+def _split_kpi_inventory_row(ws: Worksheet, kpi_inventory) -> None:
+    """Turn the merged KPI label block (B12:B13) into two rows: 'KPI:' (row 12)
+    and a new 'KPI Inventory:' (row 13). The value cell C13:D13 already exists
+    in the template (merged, #,##0), so only the B13 label + value are added."""
+    if KPI_MERGE in {str(m) for m in ws.merged_cells.ranges}:
+        ws.unmerge_cells(KPI_MERGE)
+    label = ws[KPI_INVENTORY_LABEL_CELL]
+    src = ws[KPI_LABEL_CELL]
+    label.value = "KPI Inventory:"
+    label.font = copy(src.font)
+    label.alignment = copy(src.alignment)
+    if kpi_inventory is not None:
+        ws[KPI_INVENTORY_VALUE_CELL] = kpi_inventory
+
+
 def _fill_io_name_sheet(ws: Worksheet, data: CampaignBurstData) -> None:
     """Fill one IO_name-style report sheet (header cells + the six breakdown
     sections) in place. Shared by the single- and multi-IO writers."""
@@ -220,8 +258,19 @@ def _fill_io_name_sheet(ws: Worksheet, data: CampaignBurstData) -> None:
     ws[SPEND_CELL] = round(data.spend, 2)
     ws[GUARANTEED_RATE_CELL] = data.meta.guaranteed_rate
     ws[KPI_CELL] = data.meta.kpi
+    _split_kpi_inventory_row(ws, data.meta.kpi_inventory)
+
+    # Reporting range: start from the requested window, but the end reflects
+    # the last date that actually has data (the flight may outrun delivery).
     ws[REPORT_START_CELL] = data.report_start
-    ws[REPORT_END_CELL] = data.report_end
+    report_end = data.report_end
+    if not data.date_df.empty and "date" in data.date_df.columns:
+        report_end = _to_date(max(data.date_df["date"]))
+    ws[REPORT_END_CELL] = report_end
+
+    # All header dates render DD/MM/YYYY.
+    for cell in (FLIGHT_START_CELL, FLIGHT_END_CELL, REPORT_START_CELL, REPORT_END_CELL):
+        ws[cell].number_format = DATE_FORMAT
 
     offset = 0
     delta = _write_section(ws, 17 + offset, 19 + offset, data.creative_df, "creative_name", has_quartiles=True)
@@ -292,7 +341,8 @@ def _write_data_template_sheet(wb, datas: list[CampaignBurstData]) -> None:
     row = 3  # header is row 2
     for data in datas:
         for r in data.data_template_df.itertuples(index=False):
-            ws.cell(row=row, column=1, value=r.date)                     # Date
+            date_cell = ws.cell(row=row, column=1, value=_to_date(r.date))  # Date
+            date_cell.number_format = DATE_FORMAT
             ws.cell(row=row, column=7, value=data.meta.campaign_name)    # Campaign Name
             ws.cell(row=row, column=9, value=r.creative_name)            # Creative
             ws.cell(row=row, column=10, value=r.targeting)               # Strategy
