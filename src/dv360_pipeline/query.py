@@ -156,7 +156,8 @@ def _resolve_io_channel(client: bigquery.Client, io_id: int, start_date: date, e
 def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     sql = f"""
         SELECT campaign_name, io_name, io_id, Budget AS budget, Currency AS currency,
-               guaranteedrate, kpi_type AS kpi, Product AS product, start_date, end_date
+               guaranteedrate, kpi_type AS kpi, KPI_Inventory AS kpi_inventory,
+               Product AS product, start_date, end_date
         FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
         WHERE io_id = @io_id
         LIMIT 1
@@ -189,6 +190,7 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
         currency=row["currency"],
         guaranteed_rate=float(row["guaranteedrate"]),
         kpi=kpi,
+        kpi_inventory=(None if pd.isna(row["kpi_inventory"]) else float(row["kpi_inventory"])),
         product=row["product"],
         flight_start=row["start_date"],
         flight_end=row["end_date"],
@@ -437,6 +439,7 @@ def fetch_combined_campaign_burst(
     kpis = {m.kpi for m in metas}
     products = {m.product for m in metas}
     currencies = {m.currency for m in metas}
+    inventories = [m.kpi_inventory for m in metas if m.kpi_inventory is not None]
 
     combined_meta = CampaignMeta(
         campaign_name=metas[0].campaign_name,
@@ -449,6 +452,7 @@ def fetch_combined_campaign_burst(
         currency=currencies.pop() if len(currencies) == 1 else "Mixed",
         guaranteed_rate=guaranteed_rates.pop() if len(guaranteed_rates) == 1 else "Mixed",
         kpi=kpis.pop() if len(kpis) == 1 else "Mixed",
+        kpi_inventory=sum(inventories) if inventories else None,
         product=products.pop() if len(products) == 1 else "Mixed",
         flight_start=min(m.flight_start for m in metas),
         flight_end=max(m.flight_end for m in metas),
