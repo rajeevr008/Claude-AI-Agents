@@ -125,16 +125,16 @@ def _write_section(
         r = data_start + i
         ws.cell(row=r, column=NAME_COL, value=getattr(row, name_column))
         ws.cell(row=r, column=IMPRESSIONS_COL, value=int(row.impressions))
-        ws.cell(row=r, column=TRUEVIEW_COL, value=int(row.youtube_views))
+        ws.cell(row=r, column=TRUEVIEW_COL, value=int(row.trueview_views))
         ws.cell(row=r, column=SPEND_COL, value=round(float(row.spend), 2))
         ws.cell(row=r, column=CLICKS_COL, value=int(row.clicks))
         ws.cell(row=r, column=VIEW_RATE_COL).value = f"=D{r}/C{r}"
         ws.cell(row=r, column=CTR_COL).value = f"=G{r}/C{r}"
         if has_quartiles:
-            ws.cell(row=r, column=Q25_COL, value=int(row.video_25))
-            ws.cell(row=r, column=Q50_COL, value=int(row.video_50))
-            ws.cell(row=r, column=Q75_COL, value=int(row.video_75))
-            ws.cell(row=r, column=Q100_COL, value=int(row.video_100))
+            ws.cell(row=r, column=Q25_COL, value=int(row.video_q25))
+            ws.cell(row=r, column=Q50_COL, value=int(row.video_q50))
+            ws.cell(row=r, column=Q75_COL, value=int(row.video_q75))
+            ws.cell(row=r, column=Q100_COL, value=int(row.video_q100))
 
     # Always rewrite the Total row's formulas against the *current* row
     # positions. Even when a section isn't resized (e.g. the Date section
@@ -180,10 +180,10 @@ def write_report(data: CampaignBurstData, template_path: str, output_path: str) 
     delta = _write_section(ws, 28 + offset, 33 + offset, data.device_df, "device_type", has_quartiles=False)
     offset += delta
 
-    delta = _write_section(ws, 35 + offset, 38 + offset, data.gender_df, "youtube_gender", has_quartiles=False)
+    delta = _write_section(ws, 35 + offset, 38 + offset, data.gender_df, "gender", has_quartiles=False)
     offset += delta
 
-    delta = _write_section(ws, 40 + offset, 43 + offset, data.age_df, "youtube_age", has_quartiles=False)
+    delta = _write_section(ws, 40 + offset, 43 + offset, data.age_df, "age", has_quartiles=False)
     offset += delta
 
     delta = _write_section(
@@ -207,9 +207,9 @@ def _write_data_template_sheet(wb, data: CampaignBurstData) -> None:
         ws.cell(row=row, column=15, value=round(float(r.spend), 2))  # Cost
         ws.cell(row=row, column=16, value=int(r.impressions))        # Impressions
         ws.cell(row=row, column=17, value=int(r.clicks))             # Clicks
-        ws.cell(row=row, column=20, value=int(r.youtube_views))      # Video Views
-        ws.cell(row=row, column=21, value=int(r.video_25))           # 25% Completed View
-        ws.cell(row=row, column=22, value=int(r.video_50))           # 50% Completed View
-        ws.cell(row=row, column=23, value=int(r.video_75))           # 75% Completed View
-        ws.cell(row=row, column=24, value=int(r.video_100))          # 100% Completed View
+        ws.cell(row=row, column=20, value=int(r.trueview_views))     # Video Views
+        ws.cell(row=row, column=21, value=int(r.video_q25))          # 25% Completed View
+        ws.cell(row=row, column=22, value=int(r.video_q50))          # 50% Completed View
+        ws.cell(row=row, column=23, value=int(r.video_q75))          # 75% Completed View
+        ws.cell(row=row, column=24, value=int(r.video_q100))         # 100% Completed View
         row += 1

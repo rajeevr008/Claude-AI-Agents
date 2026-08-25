@@ -8,18 +8,23 @@ out of scope here. This repo is Layer 4 (BigQuery query module) and Layer 5
 
 - Project: `ssc-apex-apac-prd-mg`
 - Dataset: `apex_dv360`
-- Tables (see `src/dv360_pipeline/query.py` for exact names — they have long
-  auto-generated suffixes):
-  - **Creative** (`SG_creative_rpt_...`): daily grain, one row per
-    `insertion_order_id` + `line_item_id` + `trueview_ad` + `date`.
-  - **Demo** (`sg_demo_aiagent_...`): daily grain, broken out by
-    `youtube_gender` and `youtube_age`.
-  - **Device** (`sg_device_rpt_...`): daily grain, broken out by
-    `device_type` (values seen: Connected TV, Smart Phone, Tablet, Desktop).
+- Tables (conformed breakdown views that union YouTube + Non-YouTube data;
+  see `src/dv360_pipeline/query.py` for exact names):
+  - **Creative** (`sg_creative_breakdown_v2`): daily grain, one row per
+    `insertion_order_id` + `line_item` + `creative` + `date`. Creative name
+    is the `creative` column. Carries video **and** audio quartiles.
+  - **Demo** (`sg_demo_breakdown_v2`): daily grain, broken out by `gender`
+    and `age`. YouTube-only, so it has **no audio** columns.
+  - **Device** (`sg_device_breakdown_v2`): daily grain, broken out by
+    `device_type`. Carries video and audio quartiles.
   - **campaign_mapping**: one row per IO. Columns: `campaign_name`,
     `io_name`, `io_id`, `budget`, `guaranteedrate`, `kpi`, `channel`,
     `start_date`, `end_date`. This is the only source of budget/spend-rate
-    info — none of the three reporting tables have a cost/spend column.
+    info — none of the breakdown tables have a cost/spend column.
+
+Shared metric columns on the breakdown tables: `impressions`, `clicks`,
+`trueview_views`, `video_q25`/`video_q50`/`video_q75`/`video_q100`, and
+(creative/device only) `audio_q25`/`audio_q50`/`audio_q75`/`audio_q100`.
 
 Join key across all tables: `insertion_order_id` (creative/demo/device) /
 `io_id` (campaign_mapping) — same value, different column name.
@@ -33,15 +38,25 @@ JSON). Never commit credentials; `config/` is gitignored for this.
 **Spend formula**: `campaign_mapping.kpi` selects both which column to sum
 and which multiplier formula to apply — these differ by KPI type, so they're
 two separate lookups (`KPI_COLUMN_MAP` and `KPI_SPEND_FORMULA` in
-`query.py`):
-- `kpi='clicks'` → `guaranteed_rate * SUM(clicks)`
-- `kpi='views'` → `guaranteed_rate * SUM(youtube_views)`
-- `kpi='impressions'` → `guaranteed_rate * SUM(impressions) / 1000` (CPM)
-- `kpi='completed views'` → `guaranteed_rate * SUM(rich_media_video_completions)`
+`query.py`). The `kpi` value is normalized (stripped + lower-cased) before
+lookup. All formulas are `guaranteed_rate * SUM(column)` except CPM, which
+divides by 1000:
+
+| `kpi` (buying method) | column | formula |
+|---|---|---|
+| `trueview: views` (CPV) | `trueview_views` | `rate * SUM(trueview_views)` |
+| `impressions` (CPM) | `impressions` | `rate * SUM(impressions) / 1000` |
+| `complete views (video)` (CPCV) | `video_q100` | `rate * SUM(video_q100)` |
+| `clicks` (CPC) | `clicks` | `rate * SUM(clicks)` |
+| `first-quartile views (video)` | `video_q25` | `rate * SUM(video_q25)` |
+| `midpoint views (video)` | `video_q50` | `rate * SUM(video_q50)` |
+| `third-quartile views (video)` | `video_q75` | `rate * SUM(video_q75)` |
+| `complete listens (audio)` | `audio_q100` | `rate * SUM(audio_q100)` |
 
 An unrecognized `kpi` value raises `UnknownKpiError` rather than silently
 computing wrong spend — add mappings in both dicts if a genuinely new KPI
-type shows up.
+type shows up. Audio KPIs produce zero spend on the demo breakdown (no audio
+columns there).
 
 Spend is computed **per row** in every breakdown (creative/targeting/device/
 gender/age/date), not just as a single total — each row's spend uses that
@@ -61,7 +76,7 @@ summed like the other creative-level breakdowns).
   explicitly to `fetch_campaign_burst(io_id, start_date, end_date)`. May be
   a sub-range of the flight (e.g. weekly report within a monthly IO).
 
-**Creative Name** = `trueview_ad` column (not `line_item`).
+**Creative Name** = `creative` column (not `line_item`).
 
 ## Template mapping (`templates/campaign_burst_template.xlsx`)
 
@@ -93,18 +108,17 @@ template row anchors (before any resizing):
 
 | Section | Header | Total (template) | Source | Group by |
 |---|---|---|---|---|
-| Creative | 17 | 19 | creative table | `trueview_ad` |
+| Creative | 17 | 19 | creative table | `creative` |
 | Targeting | 21 | 26 | creative table | derived from `line_item` |
 | Device | 28 | 33 | device table | `device_type` |
-| Gender | 35 | 38 | demo table | `youtube_gender` |
-| Age | 40 | 43 | demo table | `youtube_age` |
+| Gender | 35 | 38 | demo table | `gender` |
+| Age | 40 | 43 | demo table | `age` |
 | Date | 45 | 102 | creative table | `date` |
 
-Columns: B=name/date, C=Impressions, D=TrueView(`youtube_views`), E=Spends,
+Columns: B=name/date, C=Impressions, D=TrueView(`trueview_views`), E=Spends,
 F=View Rate (formula), G=Clicks, H=CTR (formula). Creative and Targeting
 additionally have I/J/K/L = video played to 25/50/75/100%
-(`rich_media_video_first_quartile_completes` / `_midpoints` /
-`_third_quartile_completes` / `_completions`).
+(`video_q25` / `video_q50` / `video_q75` / `video_q100`).
 
 **Row-level data is written as static values** (source data, nothing to
 derive). **Per-row View Rate/CTR are Excel formulas** (`=D{r}/C{r}`,
@@ -117,8 +131,8 @@ not auto-adjust formula text elsewhere in the sheet when rows are inserted.
 Age/Gender/Creative/Device/Targeting sections are resized to fit the exact
 number of distinct values found (`ws.insert_rows()`/`ws.delete_rows()`),
 cascading an offset through every section processed after it. Real data has
-shown `youtube_age`/`youtube_gender` include an `'Unknown'` bucket in
-addition to the expected values — plan for it.
+shown `age`/`gender` include an `'Unknown'` bucket in addition to the
+expected values — plan for it.
 
 The Date section's template is pre-formatted for 56 rows (fits ~8 weeks of
 daily data) with number formats/borders already applied — normal reporting
@@ -133,14 +147,14 @@ Implementation: `src/dv360_pipeline/writer.py`, see `_write_section()` /
 A subset of its 24 columns have a real source and are filled: Date,
 Campaign Name, Creative, Strategy, Cost, Impressions, Clicks, Video Views,
 and the four video-completion-quartile columns. Sourced from
-`data_template_df` — a date + creative (`trueview_ad`) + targeting
+`data_template_df` — a date + creative (`creative`) + targeting
 (same derivation as the Targeting breakdown) grain query — one row per
 distinct date/creative/targeting combination, *not* just one row per day
 (the day-only `date_df` has no creative/targeting detail to draw from).
-Creative = `trueview_ad`, Strategy = derived targeting string. Everything
+Creative = `creative`, Strategy = derived targeting string. Everything
 else (Media Schedule No, Topic, Audience, Channel, Publisher, Placement,
 Platform Objective, Rate Type, Media Buy Format, Currency) has no source
-in the three reporting tables and is left blank. Scope may expand later.
+in the breakdown tables and is left blank. Scope may expand later.
 
 ### Sheet1
 
@@ -171,5 +185,7 @@ Auth via `gcloud auth application-default login` or
 - No orchestration/scheduling (Layer 6 in the original architecture diagram
   — Cloud Composer, monitoring, human review) — explicitly out of scope for
   this repo.
-- `KPI_COLUMN_MAP` only has `clicks`/`views`/`impressions` — extend if
-  `campaign_mapping.kpi` gets new values.
+- `KPI_COLUMN_MAP`/`KPI_SPEND_FORMULA` cover the eight known KPI types
+  (trueview views, impressions, clicks, the four video quartiles, and audio
+  complete listens) — extend both dicts if `campaign_mapping.kpi` gets new
+  values.
