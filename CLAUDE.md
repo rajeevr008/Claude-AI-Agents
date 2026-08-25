@@ -184,6 +184,28 @@ in the breakdown tables and is left blank. Scope may expand later.
 
 Static lookup table (targeting-code → label). Not written to.
 
+### Multi-IO export (separate sheet per IO)
+
+The app offers two report types for a multi-IO selection: **Combine** (the
+existing `fetch_combined_campaign_burst` → `write_report`, one summed report)
+and **Separate sheet per IO** (`fetch_separate_campaign_bursts` →
+`write_multi_io_report`). The separate path copies the pristine `IO_name`
+template once per IO *before filling any* (openpyxl `copy_worksheet`
+preserves merged cells / number formats / borders), fills each with
+`_fill_io_name_sheet`, and writes one **combined** `Data Template` with every
+IO's detail rows stacked; `Sheet1` is kept once. Final sheet order is all IO
+report sheets, then `Data Template`, then `Sheet1`.
+
+**Sheet naming** (`_io_sheet_label`): the IO's `io_name` last two
+`-`-delimited segments rejoined with `-` (e.g.
+`...-Video Reach Campaign-Burst 5` → `Video Reach Campaign-Burst 5`;
+`...-Video-Test` → `Video-Test`), confirmed against the client's naming
+sheet (127/127). `_excel_safe_sheet_name` then makes it Excel-valid: strips
+illegal chars (`: \ / ? * [ ]`), middle-truncates to 31 chars keeping both
+ends so trailing distinguishers (`Burst 6 Part 5` vs `Part 6`) survive, and
+de-duplicates case-insensitively with a ` (2)` suffix (seeded so it can't
+collide with `Data Template`/`Sheet1`).
+
 ## Running it
 
 ```
