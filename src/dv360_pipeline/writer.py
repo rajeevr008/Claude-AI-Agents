@@ -200,6 +200,15 @@ def _write_section(
     return total_row - total_row_template
 
 
+def _copy_sheet_view(src_ws: Worksheet, dst_ws: Worksheet) -> None:
+    """openpyxl's copy_worksheet drops some sheet-view display settings — most
+    visibly `showGridLines` (the template hides gridlines; copies show them,
+    which makes the header box look cluttered) and the zoom level. Carry them
+    over so every copied report sheet renders like the first one."""
+    dst_ws.sheet_view.showGridLines = src_ws.sheet_view.showGridLines
+    dst_ws.sheet_view.zoomScale = src_ws.sheet_view.zoomScale
+
+
 def _fill_io_name_sheet(ws: Worksheet, data: CampaignBurstData) -> None:
     """Fill one IO_name-style report sheet (header cells + the six breakdown
     sections) in place. Shared by the single- and multi-IO writers."""
@@ -264,6 +273,7 @@ def write_multi_io_report(datas: list[CampaignBurstData], template_path: str, ou
     used_names: set = {DATA_TEMPLATE_SHEET.casefold(), "sheet1"}
     for ws, data in zip(io_sheets, datas):
         ws.title = _excel_safe_sheet_name(_io_sheet_label(data.meta.io_name), used_names)
+        _copy_sheet_view(template_io, ws)
         _fill_io_name_sheet(ws, data)
 
     _write_data_template_sheet(wb, datas)
