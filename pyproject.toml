@@ -10,10 +10,15 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pyarrow>=17.0.0",
     "streamlit>=1.38.0",
+    # Scheduled runner: read the schedule Google Sheet + upload reports to Drive.
+    "google-api-python-client>=2.140.0",
+    "google-auth>=2.34.0",
+    "tzdata>=2024.1",
 ]
 
 [project.scripts]
 dv360-report = "dv360_pipeline.cli:main"
+dv360-run-scheduled = "dv360_pipeline.scheduled:main"
 
 [build-system]
 requires = ["hatchling"]

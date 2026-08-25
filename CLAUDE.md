@@ -249,11 +249,27 @@ Auth via `gcloud auth application-default login` or
 `GOOGLE_APPLICATION_CREDENTIALS` env var (Windows: `set` in cmd.exe,
 `$env:` in PowerShell — don't mix shells).
 
+## Scheduled runs (Layer 6)
+
+`src/dv360_pipeline/scheduled.py` (`dv360-run-scheduled`) generates reports on
+a schedule defined in a Google Sheet and uploads the `.xlsx` files to a Google
+Drive folder. It reuses the existing `fetch_*`/`write_*` functions — no report
+logic of its own. Intended to run as a **Cloud Run job** triggered **daily** by
+Cloud Scheduler; the runner reads the sheet and generates only rows whose
+`cadence` (`daily` / `weekly:Wed` / `monthly:15|last`) is due that day, so the
+schedule is fully Sheet-driven (no redeploy to change it). `is_due`,
+`_parse_io_ids`, `_parse_bool`, `_render_filename` are pure and unit-tested;
+the Sheets/Drive/BigQuery calls only run live. Config via env vars
+(`SCHEDULE_SHEET_ID`, `DRIVE_FOLDER_ID`, `SCHEDULE_TZ`, …). Full setup — sheet
+schema, Shared-Drive requirement (service accounts have no Drive quota), API
+enablement, deploy commands — is in `docs/SCHEDULING.md`. The `Dockerfile`
+builds the Cloud Run image.
+
 ## Known gaps / not yet built
 
-- No orchestration/scheduling (Layer 6 in the original architecture diagram
-  — Cloud Composer, monitoring, human review) — explicitly out of scope for
-  this repo.
+- Scheduling exists as a Cloud Run job (above), but broader orchestration
+  (monitoring, alerting, human-review gates — the rest of Layer 6) is not
+  built.
 - `KPI_COLUMN_MAP`/`KPI_SPEND_FORMULA` cover the eight known KPI types
   (trueview views, impressions, clicks, the four video quartiles, and audio
   complete listens) — extend both dicts if `campaign_mapping.kpi_type` gets new
