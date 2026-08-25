@@ -87,6 +87,18 @@ Spend is computed **per row** in every breakdown (creative/targeting/device/
 gender/age/date), not just as a single total — each row's spend uses that
 row's own KPI-column value times the guaranteed rate.
 
+**Breakdown reconciliation**: the Creative breakdown is the source of truth.
+The device/demo tables can disagree with it by a few rows (e.g. impressions
+differ while trueview matches), so `_reconcile_to_creative` rescales every
+other breakdown's metric columns (`impressions`, `trueview_views`, `clicks`,
+video/audio quartiles, `spend`) so each total equals Creative's, keeping the
+breakdown's own proportions. It uses largest-remainder apportionment
+(`_apportion`) so integer metrics stay integers and `spend` stays 2-decimal
+while summing **exactly** to Creative's displayed total; a column whose
+breakdown total is already correct is unchanged, and a zero-total column is
+left alone (nothing to distribute). Applied per IO, so combined reports stay
+aligned after summing.
+
 **Targeting** has no direct source column. It's derived from `line_item`:
 the last `-`-delimited segment (e.g. `"...-Demand Gen-Interest"` →
 `"Interest"`), computed in SQL via `SPLIT(line_item, '-')[OFFSET(...)]`.
