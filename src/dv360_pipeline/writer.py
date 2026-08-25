@@ -37,6 +37,7 @@ IO_NAME_SHEET = "IO_name"
 CAMPAIGN_NAME_CELL = "C6"
 FLIGHT_START_CELL = "C7"
 FLIGHT_END_CELL = "D7"
+CURRENCY_CELL = "C8"
 BUDGET_CELL = "C9"
 SPEND_CELL = "C10"
 GUARANTEED_RATE_CELL = "C11"
@@ -162,6 +163,7 @@ def write_report(data: CampaignBurstData, template_path: str, output_path: str) 
     ws[CAMPAIGN_NAME_CELL] = data.meta.campaign_name
     ws[FLIGHT_START_CELL] = data.meta.flight_start
     ws[FLIGHT_END_CELL] = data.meta.flight_end
+    ws[CURRENCY_CELL] = data.meta.currency
     ws[BUDGET_CELL] = data.meta.budget
     ws[SPEND_CELL] = round(data.spend, 2)
     ws[GUARANTEED_RATE_CELL] = data.meta.guaranteed_rate

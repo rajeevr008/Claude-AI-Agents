@@ -23,10 +23,16 @@ out of scope here. This repo is Layer 4 (BigQuery query module) and Layer 5
     `KPI_Inventory`. This is the only source of budget/spend-rate info —
     none of the breakdown tables have a cost/spend column. Spend keys on
     `kpi_type` (normalized); `Product` (e.g. DOOH, Demand Gen) fills the
-    `CampaignMeta.product` field. Note the mixed casing (`Budget`,
-    `Product`, `Currency`, `Buying_Method`, `KPI_Inventory`) vs the
-    lower-case breakdown/`guaranteedrate` columns; the SQL aliases them to
-    lower-case. Some rows have a null `io_id`.
+    `CampaignMeta.product` field; `Currency` fills `CampaignMeta.currency`
+    (written to cell C8, and used for Budget/Spend display in the app).
+    Note the mixed casing (`Budget`, `Product`, `Currency`, `Buying_Method`,
+    `KPI_Inventory`) vs the lower-case breakdown/`guaranteedrate` columns;
+    the SQL aliases them to lower-case. Some rows have a **null `io_id`** —
+    those IOs can't be joined to the breakdown tables, so `list_ios_for_campaign`
+    filters them out (`WHERE io_id IS NOT NULL`) to keep them out of the app's
+    picker; the real fix is to populate `io_id` in the mapping table. When
+    combining IOs across currencies, budget/spend are summed without FX
+    conversion and `currency` is reported as `"Mixed"`.
 
 Shared metric columns on the breakdown tables: `impressions`, `clicks`,
 `trueview_views`, `video_q25`/`video_q50`/`video_q75`/`video_q100`, and
@@ -95,6 +101,7 @@ export, best-effort filled), `Sheet1` (static lookup table, untouched).
 |---|---|---|
 | C6 | Campaign Name | `campaign_mapping.campaign_name` |
 | C7 / D7 | Flight start / end | `campaign_mapping.start_date` / `end_date` |
+| C8 | Currency | `campaign_mapping.Currency` (template default `SGD`) |
 | C9 | Budget | `campaign_mapping.Budget` |
 | C10 | Spend | computed (see spend formula) |
 | C11 | Guaranteed Rate | `campaign_mapping.guaranteedrate` |

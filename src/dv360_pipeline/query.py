@@ -121,8 +121,8 @@ def _run_query(client: bigquery.Client, sql: str, params: list) -> pd.DataFrame:
 
 def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     sql = f"""
-        SELECT campaign_name, io_name, io_id, Budget AS budget, guaranteedrate,
-               kpi_type AS kpi, Product AS product, start_date, end_date
+        SELECT campaign_name, io_name, io_id, Budget AS budget, Currency AS currency,
+               guaranteedrate, kpi_type AS kpi, Product AS product, start_date, end_date
         FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
         WHERE io_id = @io_id
         LIMIT 1
@@ -152,6 +152,7 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
         io_name=row["io_name"],
         io_id=int(row["io_id"]),
         budget=float(row["budget"]),
+        currency=row["currency"],
         guaranteed_rate=float(row["guaranteedrate"]),
         kpi=kpi,
         product=row["product"],
@@ -164,10 +165,11 @@ def list_ios_for_campaign(campaign_name: str) -> pd.DataFrame:
     """All IOs under a campaign_name, for the app's IO picker table."""
     client = bigquery.Client(project=PROJECT_ID)
     sql = f"""
-        SELECT io_id, io_name, Budget AS budget, guaranteedrate,
+        SELECT io_id, io_name, Budget AS budget, Currency AS currency, guaranteedrate,
                kpi_type AS kpi, Product AS product, start_date, end_date
         FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)}
         WHERE LOWER(campaign_name) LIKE LOWER(CONCAT('%', @campaign_name, '%'))
+          AND io_id IS NOT NULL
         ORDER BY io_name
     """
     params = [bigquery.ScalarQueryParameter("campaign_name", "STRING", campaign_name)]
@@ -384,12 +386,17 @@ def fetch_combined_campaign_burst(
     guaranteed_rates = {m.guaranteed_rate for m in metas}
     kpis = {m.kpi for m in metas}
     products = {m.product for m in metas}
+    currencies = {m.currency for m in metas}
 
     combined_meta = CampaignMeta(
         campaign_name=metas[0].campaign_name,
         io_name=" + ".join(m.io_name for m in metas),
         io_id=list(io_ids),
+        # NB: budget/spend are summed in each IO's own currency; when the
+        # selected IOs span currencies this total is not FX-converted and
+        # `currency` becomes "Mixed" to flag it.
         budget=sum(m.budget for m in metas),
+        currency=currencies.pop() if len(currencies) == 1 else "Mixed",
         guaranteed_rate=guaranteed_rates.pop() if len(guaranteed_rates) == 1 else "Mixed",
         kpi=kpis.pop() if len(kpis) == 1 else "Mixed",
         product=products.pop() if len(products) == 1 else "Mixed",
