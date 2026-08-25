@@ -243,6 +243,9 @@ def _split_kpi_inventory_row(ws: Worksheet, kpi_inventory) -> None:
     label.value = "KPI Inventory:"
     label.font = copy(src.font)
     label.alignment = copy(src.alignment)
+    # Unmerging clears B13's border, breaking the box's left edge — restore it
+    # from the KPI label cell (which carries the left box border).
+    label.border = copy(src.border)
     if kpi_inventory is not None:
         ws[KPI_INVENTORY_VALUE_CELL] = kpi_inventory
 
