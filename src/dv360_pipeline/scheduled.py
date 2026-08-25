@@ -184,7 +184,7 @@ def _generate_report(row: dict, template_path: str, out_dir: str):
         raise ValueError("row has no io_ids")
     start = _parse_date(row.get("start"))
     end = _parse_date(row.get("end"))
-    mode = (row.get("mode") or "combine").strip().lower()
+    mode = (row.get("mode") or "separate").strip().lower()
 
     if mode == "separate":
         datas = fetch_separate_campaign_bursts(io_ids, start, end)
@@ -222,7 +222,7 @@ def run(run_date: date, *, dry_run: bool, force: bool) -> int:
     for r in due:
         label = r.get("io_ids") or r.get("io_id") or "?"
         if dry_run:
-            print(f"  DUE  io_ids={label} mode={r.get('mode') or 'combine'} cadence={r.get('cadence')}")
+            print(f"  DUE  io_ids={label} mode={r.get('mode') or 'separate'} cadence={r.get('cadence')}")
             continue
         try:
             with tempfile.TemporaryDirectory() as tmp:

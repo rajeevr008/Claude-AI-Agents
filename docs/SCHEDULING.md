@@ -22,7 +22,7 @@ doesn't matter; names are matched case-insensitively):
 |---|---|---|---|
 | `io_ids` | yes | `1030304653` or `123,456` | one IO, or several for a combined report |
 | `cadence` | yes | `weekly:Wed` | `daily` · `weekly:Wed` / `weekly:Mon,Thu` · `monthly:15` · `monthly:last` |
-| `mode` | no | `combine` | `combine` (default) or `separate` (a sheet per IO) |
+| `mode` | no | `separate` | `separate` (default; a sheet per IO) or `combine` (one summed report) |
 | `start` | no | `2026-08-01` | reporting-range start; blank = each IO's flight start |
 | `end` | no | `2026-08-31` | reporting-range end; blank = flight end |
 | `filename` | no | `NEA_{date}.xlsx` | output name; `{date}` = report end, `{io}` = io ids |
