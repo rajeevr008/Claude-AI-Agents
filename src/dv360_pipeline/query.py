@@ -119,6 +119,40 @@ def _run_query(client: bigquery.Client, sql: str, params: list) -> pd.DataFrame:
     return client.query(sql, job_config=job_config).result().to_dataframe()
 
 
+def _channel_clause(channel: str | None) -> str:
+    """WHERE fragment restricting a breakdown to a single channel."""
+    return "\n          AND channel = @channel" if channel else ""
+
+
+def _burst_params(io_id: int, start_date: date, end_date: date, channel: str | None = None) -> list:
+    params = _date_params(io_id, start_date, end_date)
+    if channel:
+        params.append(bigquery.ScalarQueryParameter("channel", "STRING", channel))
+    return params
+
+
+def _resolve_io_channel(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> str:
+    """Pick the single channel to report for an IO.
+
+    The conformed breakdown tables union YouTube + Non-YouTube rows. When an
+    IO has YouTube delivery, the Non-YouTube rows duplicate the same line
+    items (they appear in both source reports), so summing across channels
+    double-counts impressions/clicks/views. YouTube is authoritative whenever
+    present; otherwise the IO is Non-YouTube. Every breakdown for the burst is
+    then restricted to this one channel. Demo is YouTube-only, so this never
+    removes demo rows for a YouTube IO.
+    """
+    sql = f"""
+        SELECT COUNTIF(channel = 'youtube') AS youtube_rows
+        FROM {_table_ref(CREATIVE_TABLE)}
+        WHERE insertion_order_id = @io_id
+          AND date BETWEEN @start_date AND @end_date
+    """
+    df = _run_query(client, sql, _date_params(io_id, start_date, end_date))
+    has_youtube = not df.empty and int(df.iloc[0]["youtube_rows"]) > 0
+    return "youtube" if has_youtube else "non_youtube"
+
+
 def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
     sql = f"""
         SELECT campaign_name, io_name, io_id, Budget AS budget, Currency AS currency,
@@ -176,37 +210,37 @@ def list_ios_for_campaign(campaign_name: str) -> pd.DataFrame:
     return _run_query(client, sql, params)
 
 
-def _creative_agg_sql(select_expr: str, group_by: str) -> str:
+def _creative_agg_sql(select_expr: str, group_by: str, channel: str | None) -> str:
     return f"""
         SELECT
             {select_expr},{_METRIC_AGG}
         FROM {_table_ref(CREATIVE_TABLE)}
         WHERE insertion_order_id = @io_id
-          AND date BETWEEN @start_date AND @end_date
+          AND date BETWEEN @start_date AND @end_date{_channel_clause(channel)}
         GROUP BY {group_by}
         ORDER BY {group_by}
     """
 
 
-def _fetch_creative_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
-    sql = _creative_agg_sql("creative AS creative_name", "creative_name")
-    return _run_query(client, sql, _date_params(io_id, start_date, end_date))
+def _fetch_creative_df(client, io_id, start_date, end_date, channel) -> pd.DataFrame:
+    sql = _creative_agg_sql("creative AS creative_name", "creative_name", channel)
+    return _run_query(client, sql, _burst_params(io_id, start_date, end_date, channel))
 
 
-def _fetch_targeting_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
+def _fetch_targeting_df(client, io_id, start_date, end_date, channel) -> pd.DataFrame:
     targeting_expr = (
         "SPLIT(line_item, '-')[OFFSET(ARRAY_LENGTH(SPLIT(line_item, '-')) - 1)] AS targeting"
     )
-    sql = _creative_agg_sql(targeting_expr, "targeting")
-    return _run_query(client, sql, _date_params(io_id, start_date, end_date))
+    sql = _creative_agg_sql(targeting_expr, "targeting", channel)
+    return _run_query(client, sql, _burst_params(io_id, start_date, end_date, channel))
 
 
-def _fetch_date_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
-    sql = _creative_agg_sql("date", "date")
-    return _run_query(client, sql, _date_params(io_id, start_date, end_date))
+def _fetch_date_df(client, io_id, start_date, end_date, channel) -> pd.DataFrame:
+    sql = _creative_agg_sql("date", "date", channel)
+    return _run_query(client, sql, _burst_params(io_id, start_date, end_date, channel))
 
 
-def _fetch_data_template_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
+def _fetch_data_template_df(client, io_id, start_date, end_date, channel) -> pd.DataFrame:
     """One row per date + creative + targeting, for the Data Template sheet's
     Creative and Strategy columns (date_df alone only has date granularity)."""
     targeting_expr = (
@@ -219,28 +253,28 @@ def _fetch_data_template_df(client: bigquery.Client, io_id: int, start_date: dat
             {targeting_expr},{_METRIC_AGG}
         FROM {_table_ref(CREATIVE_TABLE)}
         WHERE insertion_order_id = @io_id
-          AND date BETWEEN @start_date AND @end_date
+          AND date BETWEEN @start_date AND @end_date{_channel_clause(channel)}
         GROUP BY date, creative_name, targeting
         ORDER BY date, creative_name, targeting
     """
-    return _run_query(client, sql, _date_params(io_id, start_date, end_date))
+    return _run_query(client, sql, _burst_params(io_id, start_date, end_date, channel))
 
 
-def _fetch_device_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date) -> pd.DataFrame:
+def _fetch_device_df(client, io_id, start_date, end_date, channel) -> pd.DataFrame:
     # Device table (like Creative) carries both video and audio quartiles.
     sql = f"""
         SELECT
             device_type,{_METRIC_AGG}
         FROM {_table_ref(DEVICE_TABLE)}
         WHERE insertion_order_id = @io_id
-          AND date BETWEEN @start_date AND @end_date
+          AND date BETWEEN @start_date AND @end_date{_channel_clause(channel)}
         GROUP BY device_type
         ORDER BY device_type
     """
-    return _run_query(client, sql, _date_params(io_id, start_date, end_date))
+    return _run_query(client, sql, _burst_params(io_id, start_date, end_date, channel))
 
 
-def _fetch_demo_df(client: bigquery.Client, io_id: int, start_date: date, end_date: date, group_col: str) -> pd.DataFrame:
+def _fetch_demo_df(client, io_id, start_date, end_date, group_col, channel) -> pd.DataFrame:
     # Demo is YouTube-only and has no audio columns, so it uses the
     # video-only metric aggregation. An audio-KPI IO therefore has no demo
     # spend (handled by _add_spend_column when the column is absent).
@@ -249,11 +283,11 @@ def _fetch_demo_df(client: bigquery.Client, io_id: int, start_date: date, end_da
             {group_col},{_VIDEO_METRIC_AGG}
         FROM {_table_ref(DEMO_TABLE)}
         WHERE insertion_order_id = @io_id
-          AND date BETWEEN @start_date AND @end_date
+          AND date BETWEEN @start_date AND @end_date{_channel_clause(channel)}
         GROUP BY {group_col}
         ORDER BY {group_col}
     """
-    return _run_query(client, sql, _date_params(io_id, start_date, end_date))
+    return _run_query(client, sql, _burst_params(io_id, start_date, end_date, channel))
 
 
 def _add_spend_column(df: pd.DataFrame, kpi: str, guaranteed_rate: float) -> pd.DataFrame:
@@ -296,13 +330,17 @@ def fetch_campaign_burst(
     if start_date > end_date:
         raise ValueError(f"start_date ({start_date}) is after end_date ({end_date})")
 
-    creative_df = _fetch_creative_df(client, io_id, start_date, end_date)
-    targeting_df = _fetch_targeting_df(client, io_id, start_date, end_date)
-    date_df = _fetch_date_df(client, io_id, start_date, end_date)
-    device_df = _fetch_device_df(client, io_id, start_date, end_date)
-    gender_df = _fetch_demo_df(client, io_id, start_date, end_date, "gender")
-    age_df = _fetch_demo_df(client, io_id, start_date, end_date, "age")
-    data_template_df = _fetch_data_template_df(client, io_id, start_date, end_date)
+    # Report a single channel per IO so YouTube IOs don't double-count the
+    # duplicate Non-YouTube rows (see _resolve_io_channel).
+    channel = _resolve_io_channel(client, io_id, start_date, end_date)
+
+    creative_df = _fetch_creative_df(client, io_id, start_date, end_date, channel)
+    targeting_df = _fetch_targeting_df(client, io_id, start_date, end_date, channel)
+    date_df = _fetch_date_df(client, io_id, start_date, end_date, channel)
+    device_df = _fetch_device_df(client, io_id, start_date, end_date, channel)
+    gender_df = _fetch_demo_df(client, io_id, start_date, end_date, "gender", channel)
+    age_df = _fetch_demo_df(client, io_id, start_date, end_date, "age", channel)
+    data_template_df = _fetch_data_template_df(client, io_id, start_date, end_date, channel)
 
     kpi_column = KPI_COLUMN_MAP[meta.kpi]
     total_kpi_value = float(creative_df[kpi_column].sum()) if not creative_df.empty else 0.0

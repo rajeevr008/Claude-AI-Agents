@@ -41,6 +41,17 @@ Shared metric columns on the breakdown tables: `impressions`, `clicks`,
 Join key across all tables: `insertion_order_id` (creative/demo/device) /
 `io_id` (campaign_mapping) — same value, different column name.
 
+**Single channel per IO**: the creative/device tables carry a `channel`
+column (`youtube` / `non_youtube`) and union both. For a YouTube IO the
+Non-YouTube rows duplicate the same line items (they appear in both source
+reports), so summing across channels double-counts. Each burst therefore
+resolves one channel up front (`_resolve_io_channel`: `youtube` if the IO has
+any YouTube rows in the creative table, else `non_youtube`) and restricts
+every breakdown to it via `AND channel = @channel`. Demo is YouTube-only, so
+this never drops demo rows for a YouTube IO. `fetch_combined_campaign_burst`
+resolves each IO's channel independently, so a combined report may mix
+channels across IOs while each IO stays single-channel.
+
 Auth: Application Default Credentials (`gcloud auth application-default
 login`, or `GOOGLE_APPLICATION_CREDENTIALS` pointing at a service account
 JSON). Never commit credentials; `config/` is gitignored for this.
