@@ -23,6 +23,7 @@ TABLES = {
     "demo": "sg_demo_breakdown_v2",
     "device": "sg_device_breakdown_v2",
     "campaign_mapping": "campaign_mapping",
+    "campaign_reach": "campaign_reach",  # campaign_id, campaign_name, reach
 }
 
 

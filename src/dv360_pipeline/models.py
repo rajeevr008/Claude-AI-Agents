@@ -17,6 +17,7 @@ class CampaignMeta:
     product: str
     flight_start: date
     flight_end: date
+    reach: int | None = None  # campaign-level unique reach; None until set up
 
 
 @dataclass

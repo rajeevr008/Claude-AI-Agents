@@ -29,6 +29,7 @@ import re
 from copy import copy
 
 import pandas as pd
+from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -123,9 +124,46 @@ Q25_COL = 9             # I
 Q50_COL = 10            # J
 Q75_COL = 11            # K
 Q100_COL = 12           # L
+REACH_COL = 13          # M — Reach column, Creative section only
 
 BASE_METRIC_COLS = [IMPRESSIONS_COL, TRUEVIEW_COL, SPEND_COL, CLICKS_COL]
 QUARTILE_COLS = [Q25_COL, Q50_COL, Q75_COL, Q100_COL]
+
+
+def _copy_cell_style(ws: Worksheet, src_row: int, src_col: int, dst_row: int, dst_col: int) -> None:
+    src = ws.cell(row=src_row, column=src_col)
+    dst = ws.cell(row=dst_row, column=dst_col)
+    dst.number_format = src.number_format
+    dst.font = copy(src.font)
+    dst.border = copy(src.border)
+    dst.fill = copy(src.fill)
+    dst.alignment = copy(src.alignment)
+
+
+def _add_creative_reach_column(
+    ws: Worksheet, header_row: int, data_start: int, n_rows: int, total_row: int, reach: int
+) -> None:
+    """Add a 'Reach' column (M) to the Creative section only: a header plus the
+    single campaign-level reach merged down all creative data rows. Reach is
+    campaign-level (not per-creative) and can't be summed, so it spans the rows
+    as one value and the Total row is left blank. Styles are copied from the
+    neighbouring quartile column (L) so borders/fills line up."""
+    letter = get_column_letter(REACH_COL)
+    ws.column_dimensions[letter].width = ws.column_dimensions[get_column_letter(IMPRESSIONS_COL)].width or 12
+
+    _copy_cell_style(ws, header_row, Q100_COL, header_row, REACH_COL)
+    ws.cell(row=header_row, column=REACH_COL, value="Reach")
+    for r in range(data_start, total_row + 1):
+        _copy_cell_style(ws, r, Q100_COL, r, REACH_COL)
+
+    if n_rows <= 0:
+        return
+    data_end = data_start + n_rows - 1
+    if n_rows > 1:
+        ws.merge_cells(start_row=data_start, start_column=REACH_COL, end_row=data_end, end_column=REACH_COL)
+    cell = ws.cell(row=data_start, column=REACH_COL, value=int(reach))
+    cell.number_format = "#,##0"
+    cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
 def _copy_row_style(ws: Worksheet, src_row: int, dst_row: int, min_col: int, max_col: int) -> None:
@@ -277,6 +315,11 @@ def _fill_io_name_sheet(ws: Worksheet, data: CampaignBurstData) -> None:
 
     offset = 0
     delta = _write_section(ws, 17 + offset, 19 + offset, data.creative_df, "creative_name", has_quartiles=True)
+    # Reach (campaign-level) as a merged column on the Creative section only —
+    # skipped entirely when there's no reach data, so the layout is unchanged.
+    if data.meta.reach is not None:
+        n_creative = len(data.creative_df)
+        _add_creative_reach_column(ws, 17, 18, n_creative, 18 + n_creative, data.meta.reach)
     offset += delta
     delta = _write_section(ws, 21 + offset, 26 + offset, data.targeting_df, "targeting", has_quartiles=False)
     offset += delta

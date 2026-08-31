@@ -23,6 +23,10 @@ CREATIVE_TABLE = "sg_creative_breakdown_v2"
 DEMO_TABLE = "sg_demo_breakdown_v2"
 DEVICE_TABLE = "sg_device_breakdown_v2"
 CAMPAIGN_MAPPING_TABLE = "campaign_mapping"
+# Campaign-level reach: one row per campaign (campaign_id, campaign_name, reach).
+# Joined to campaign_mapping.campaign_id (a column added for this). Optional —
+# if the table or the campaign_id column is absent, reach is simply omitted.
+CAMPAIGN_REACH_TABLE = "campaign_reach"
 
 # campaign_mapping.kpi selects BOTH the metric column to sum (KPI_COLUMN_MAP)
 # and the spend multiplier formula (KPI_SPEND_FORMULA). Keys are the kpi
@@ -195,7 +199,35 @@ def _fetch_campaign_meta(client: bigquery.Client, io_id: int) -> CampaignMeta:
         product=row["product"],
         flight_start=row["start_date"],
         flight_end=row["end_date"],
+        reach=_fetch_reach(client, io_id),
     )
+
+
+def _fetch_reach(client: bigquery.Client, io_id: int) -> int | None:
+    """Campaign-level reach for the IO's campaign, or None.
+
+    Optional and self-disabling: joins campaign_mapping.campaign_id to the
+    campaign_reach table. If either the campaign_id column or the campaign_reach
+    table doesn't exist yet (or there's no matching row), returns None and the
+    report renders exactly as before — so this can be merged before the reach
+    data is set up. campaign_id is CAST to STRING on both sides to avoid
+    INT64/STRING join-type mismatches.
+    """
+    sql = f"""
+        SELECT r.reach AS reach
+        FROM {_table_ref(CAMPAIGN_MAPPING_TABLE)} m
+        JOIN {_table_ref(CAMPAIGN_REACH_TABLE)} r
+          ON CAST(m.campaign_id AS STRING) = CAST(r.campaign_id AS STRING)
+        WHERE m.io_id = @io_id
+        LIMIT 1
+    """
+    try:
+        df = _run_query(client, sql, [bigquery.ScalarQueryParameter("io_id", "INT64", io_id)])
+    except Exception:  # noqa: BLE001 - reach is optional; missing table/column => no reach
+        return None
+    if df.empty or pd.isna(df.iloc[0]["reach"]):
+        return None
+    return int(df.iloc[0]["reach"])
 
 
 def list_ios_for_campaign(campaign_name: str) -> pd.DataFrame:
@@ -500,6 +532,7 @@ def fetch_combined_campaign_burst(
     products = {m.product for m in metas}
     currencies = {m.currency for m in metas}
     inventories = [m.kpi_inventory for m in metas if m.kpi_inventory is not None]
+    reaches = {m.reach for m in metas if m.reach is not None}
 
     combined_meta = CampaignMeta(
         campaign_name=metas[0].campaign_name,
@@ -514,6 +547,9 @@ def fetch_combined_campaign_burst(
         kpi=kpis.pop() if len(kpis) == 1 else "Mixed",
         kpi_inventory=sum(inventories) if inventories else None,
         product=products.pop() if len(products) == 1 else "Mixed",
+        # Reach can't be summed across campaigns; show it only when the combined
+        # IOs share one campaign's reach, otherwise omit it.
+        reach=reaches.pop() if len(reaches) == 1 else None,
         flight_start=min(m.flight_start for m in metas),
         flight_end=max(m.flight_end for m in metas),
     )

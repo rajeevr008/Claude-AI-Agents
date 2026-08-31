@@ -40,6 +40,16 @@ Shared metric columns on the breakdown tables: `impressions`, `clicks`,
 `trueview_views`, `video_q25`/`video_q50`/`video_q75`/`video_q100`, and
 (creative/device only) `audio_q25`/`audio_q50`/`audio_q75`/`audio_q100`.
 
+  - **campaign_reach** (`campaign_reach`, optional): one row per campaign —
+    `campaign_id`, `campaign_name`, `reach` (campaign-level unique users).
+    Joined via a `campaign_id` column added to `campaign_mapping`
+    (`CAST`-to-STRING on both sides). `_fetch_reach` is **self-disabling**:
+    if the table or the `campaign_id` column is absent (or no row matches),
+    it returns `None` and the report renders exactly as before — so the code
+    is safe to ship before the reach data exists. Reach can't be summed, so a
+    combined multi-IO report shows reach only when all IOs share one
+    campaign's value, else omits it.
+
 Join key across all tables: `insertion_order_id` (creative/demo/device) /
 `io_id` (campaign_mapping) — same value, different column name.
 
@@ -166,6 +176,14 @@ Columns: B=name/date, C=Impressions, D=TrueView(`trueview_views`), E=Spends,
 F=View Rate (formula), G=Clicks, H=CTR (formula). Creative and Targeting
 additionally have I/J/K/L = video played to 25/50/75/100%
 (`video_q25` / `video_q50` / `video_q75` / `video_q100`).
+
+**Reach column (Creative only)**: when `CampaignMeta.reach` is present, the
+Creative section gets a `Reach` column at **M** (`_add_creative_reach_column`)
+— the single campaign-level reach value merged down all creative data rows
+(reach is campaign-level, not per-creative, and can't be summed, so the Total
+row's M is left blank). No other breakdown gets a Reach column, and the column
+is omitted entirely when there's no reach data, leaving the layout unchanged.
+Styles/width are copied from column L so borders/fills line up.
 
 **Row-level data is written as static values** (source data, nothing to
 derive). **Per-row View Rate/CTR are Excel formulas** (`=D{r}/C{r}`,
